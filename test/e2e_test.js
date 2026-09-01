@@ -188,8 +188,8 @@ const { chromium, devices } = require('playwright');
 
   await step('admin login works', async () => {
     await page2.goto('http://localhost:8900/admin.html', { waitUntil: 'domcontentloaded' });
-    await page2.fill('#e', 'ben@cityjeans.com');
-    await page2.fill('#p', 'CityJeansDrops!2026');
+    await page2.fill('#e', 'qa-bot@cityjeans.com');
+    await page2.fill('#p', 'QaBot-Temp-2026!x');
     await page2.click('#signin');
     await page2.waitForSelector('#app', { state: 'visible', timeout: 15000 });
   });
@@ -203,9 +203,9 @@ const { chromium, devices } = require('playwright');
 
   await step('releases tab shows the drop and its reserved count', async () => {
     await page2.click('.tab[data-v="v-rel"]');
-    await page2.waitForSelector('#relTable tbody tr');
-    const t = await page2.textContent('#relTable');
-    if (!t.includes('Jordan')) throw new Error('release missing from table');
+    await page2.waitForFunction(
+      () => /Jordan/.test(document.getElementById('relTable').textContent),
+      null, { timeout: 20000 });
   });
 
   await step('reservations tab lists the new reservation', async () => {
@@ -219,16 +219,18 @@ const { chromium, devices } = require('playwright');
 
   await page2.screenshot({ path: '/root/cityjeans-drops/shot-4-admin-reservations.png', fullPage: true });
 
-  await step('release editor loads inventory matrix', async () => {
+  await step('release editor loads the quantity editor', async () => {
     await page2.click('.tab[data-v="v-rel"]');
     await page2.waitForSelector('#relTable [data-edit]');
     await page2.locator('#relTable tbody tr', { hasText: 'Jordan' }).locator('[data-edit]').click();
     await page2.waitForSelector('#v-edit.on');
-    await page2.waitForSelector('#matrix input');
-    const n = await page2.locator('#matrix input').count();
-    if (n < 12) throw new Error('matrix inputs = ' + n);
+    await page2.waitForSelector('#qtyStores details', { timeout: 15000 });
+    const stores = await page2.locator('#qtyStores details').count();
+    if (stores < 2) throw new Error('only ' + stores + ' stores in the stack');
+    const n = await page2.locator('#qtyStores details').first().locator('input').count();
+    if (n < 12) throw new Error('only ' + n + ' size rows in the first store');
     const tot = await page2.textContent('#matrixTotal');
-    if (!/pairs loaded/.test(tot)) throw new Error('total = ' + tot);
+    if (!/pair/.test(tot)) throw new Error('grand total = ' + tot);
   });
 
   await page2.screenshot({ path: '/root/cityjeans-drops/shot-5-admin-editor.png', fullPage: true });
@@ -268,18 +270,139 @@ const { chromium, devices } = require('playwright');
   });
 
   const invitee = 'e2e-staff-' + Date.now() + '@cityjeans.com';
-  await step('invite a teammate, then revoke them', async () => {
+  await step('create a staff account, then revoke it', async () => {
     await page2.fill('#invEmail', invitee);
+    await page2.fill('#invName', 'E2E Tester');
     await page2.selectOption('#invRole', 'staff');
-    await page2.fill('#invNote', 'e2e test row');
+    await page2.click('#genPass');
+    const pass = await page2.inputValue('#invPass');
+    if (pass.length < 10) throw new Error('generated password too short: ' + pass);
     await page2.click('#invite');
     await page2.waitForSelector('#invmsg.show');
-    let t = await page2.textContent('#invmsg');
-    if (!/can now set up an account/i.test(t)) throw new Error('invite said: ' + t);
+    const t = await page2.textContent('#invmsg');
+    if (!/Account created/i.test(t)) throw new Error('create said: ' + t);
+    if (!t.includes(pass)) throw new Error('temp password not shown to the admin');
+    // the new account must actually be able to sign in
+    const ok = await page2.evaluate(async ([url, key, em, pw]) => {
+      const r = await fetch(url + '/auth/v1/token?grant_type=password', {
+        method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: em, password: pw }) });
+      return (await r.json()).access_token ? true : false;
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', invitee, pass]);
+    if (!ok) throw new Error('the new account could not sign in');
     await page2.waitForSelector(`#staffTable [data-rev="${invitee}"]`, { timeout: 10000 });
     await page2.click(`#staffTable [data-rev="${invitee}"]`);
     await page2.waitForFunction(
       e => !document.querySelector(`#staffTable [data-rev="${e}"]`), invitee, { timeout: 10000 });
+  });
+
+  await step('size run is checkboxes, and reserved sizes are locked', async () => {
+    await page2.click('.tab[data-v="v-rel"]');
+    await page2.waitForSelector('#relTable [data-edit]');
+    await page2.locator('#relTable tbody tr', { hasText: 'Jordan' }).locator('[data-edit]').click();
+    await page2.waitForSelector('#sizeChips .chip');
+    if (await page2.locator('#fSizes').count()) throw new Error('the free-text size box is still there');
+    await page2.waitForSelector('#qtyStores .qtyrow', { timeout: 15000 });
+    const chips = await page2.locator('#sizeChips .chip').count();
+    if (chips < 12) throw new Error('only ' + chips + ' size chips');
+    const rowsIn = () => page2.locator('#qtyStores details').first().locator('.qtyrow').count();
+    const before = await rowsIn();
+    await page2.locator('#sizeChips .chip:not(.locked)').first().click();
+    await page2.waitForTimeout(300);
+    const after = await rowsIn();
+    if (after >= before) throw new Error('unticking a size did not remove its row');
+    await page2.locator('#sizeChips .chip:not(.locked)').first().click();
+    await page2.waitForTimeout(300);
+  });
+
+  await step('switching scale offers the matching size run', async () => {
+    await page2.selectOption('#fScale', 'gs');
+    await page2.waitForTimeout(300);
+    const txt = await page2.textContent('#sizeChips');
+    if (!/Y/.test(txt)) throw new Error('GS sizes not offered: ' + txt.slice(0, 80));
+    await page2.selectOption('#fScale', 'mens');
+    await page2.waitForTimeout(300);
+  });
+
+  await step('stores open and close, and each holds its own numbers', async () => {
+    await page2.waitForSelector('#qtyStores details');
+    const all = page2.locator('#qtyStores details');
+    const count = await all.count();
+    if (count < 2) throw new Error('need 2+ stores');
+
+    const a = all.nth(0), b = all.nth(1);
+    const aId = await a.getAttribute('data-row');
+
+    // the summary line collapses/expands
+    await a.locator('summary').click();
+    await page2.waitForTimeout(200);
+    const openedA = await a.evaluate(el => el.open);
+    await a.locator('summary').click();
+    await page2.waitForTimeout(200);
+    if (openedA === await a.evaluate(el => el.open))
+      throw new Error('the store section does not toggle');
+
+    if (!(await a.evaluate(el => el.open))) await a.locator('summary').click();
+    if (!(await b.evaluate(el => el.open))) await b.locator('summary').click();
+    await page2.waitForTimeout(250);
+
+    const rows = await a.locator('.qtyrow').count();
+    page2.once('dialog', d => d.accept('3'));
+    await a.locator('[data-fillrow]').click();
+    await page2.waitForTimeout(400);
+
+    const aNow = page2.locator(`#qtyStores details[data-row="${aId}"]`);
+    const aVals = await aNow.locator('input').evaluateAll(e => e.map(x => x.value));
+    if (!aVals.every(v => v === '3'))
+      throw new Error('fill missed cells in its own store: ' + aVals.join(','));
+
+    const bVals = await page2.locator(`#qtyStores details:not([data-row="${aId}"])`)
+      .first().locator('input').evaluateAll(e => e.map(x => x.value));
+    if (bVals.length && bVals.every(v => v === '3'))
+      throw new Error('the fill leaked into another store');
+
+    const head = await aNow.locator('.rowtot').textContent();
+    if (Number(head) !== 3 * rows)
+      throw new Error(`store header says ${head}, expected ${3 * rows}`);
+  });
+
+  await step('summaries total by store and by size', async () => {
+    const byStore = await page2.locator('#sumStores div').count();
+    const bySize  = await page2.locator('#sumSizes div').count();
+    const rows    = await page2.locator('#qtyStores details').first().locator('.qtyrow').count();
+    if (byStore < 2) throw new Error('by-store summary has ' + byStore + ' rows');
+    if (bySize !== rows) throw new Error('by-size summary has ' + bySize + ' rows for ' + rows + ' sizes');
+
+    const sums = await page2.evaluate(() => {
+      const num = sel => [...document.querySelectorAll(sel + ' div b')].map(b => Number(b.textContent));
+      const stores = num('#sumStores'), sizes = num('#sumSizes');
+      const add = a => a.reduce((x, y) => x + y, 0);
+      const grand = Number((document.getElementById('matrixTotal').textContent.match(/(\d+)\s*pair/) || [])[1]);
+      return { stores: add(stores), sizes: add(sizes), grand };
+    });
+    if (sums.stores !== sums.sizes)
+      throw new Error(`by-store total ${sums.stores} != by-size total ${sums.sizes}`);
+    if (sums.grand !== sums.stores)
+      throw new Error(`grand total ${sums.grand} != summary total ${sums.stores}`);
+  });
+
+  await step('register offers camera scanning', async () => {
+    await page2.click('.tab[data-v="v-reg"]');
+    await page2.waitForSelector('#scanStart');
+    if (!(await page2.isVisible('#scanStart'))) throw new Error('scan button not visible');
+    const decoded = await page2.evaluate(() => {
+      // exercise the decode path without a real camera
+      window.__clicked = false;
+      const go = document.getElementById('rgo');
+      const orig = go.click.bind(go);
+      go.click = () => { window.__clicked = true; };
+      window.__drops.onScanned('https://example.com/x?c=CJ-AB12CD');
+      go.click = orig;
+      return { code: document.getElementById('rcode').value, submitted: window.__clicked };
+    });
+    if (decoded.code !== 'CJ-AB12CD')
+      throw new Error('scanned value parsed to "' + decoded.code + '"');
+    if (!decoded.submitted) throw new Error('a successful scan did not trigger the lookup');
   });
 
   await step('an uninvited email cannot create an account', async () => {
@@ -292,6 +415,67 @@ const { chromium, devices } = require('playwright');
       return { status: res.status, body: (await res.text()).slice(0, 120) };
     }, { url: 'http://localhost:8900', key: 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a' });
     if (r.status < 400) throw new Error('signup succeeded! status ' + r.status + ' ' + r.body);
+  });
+
+  console.log('\n--- MOBILE ADMIN (iPhone 13) ---');
+  const mctx = await browser.newContext({ ...devices['iPhone 13'] });
+  const m = await mctx.newPage();
+  await block(m);
+  m.on('pageerror', e => errors.push('MOBILE PAGEERROR: ' + e.message));
+
+  await step('signs in on a phone', async () => {
+    await m.goto('http://localhost:8900/admin.html', { waitUntil: 'domcontentloaded' });
+    await m.fill('#e', 'qa-bot@cityjeans.com');
+    await m.fill('#p', 'QaBot-Temp-2026!x');
+    await m.click('#signin');
+    await m.waitForSelector('#app', { state: 'visible', timeout: 20000 });
+  });
+
+  const noOverflow = async (label) => {
+    const bad = await m.evaluate(() => {
+      const w = window.innerWidth;
+      return [...document.querySelectorAll('#app *')]
+        .filter(el => el.getBoundingClientRect().width > w + 1)
+        .map(el => el.tagName + (el.id ? '#' + el.id : ''))
+        .slice(0, 3);
+    });
+    if (bad.length) throw new Error(label + ' overflows: ' + bad.join(', '));
+    const doc = await m.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+    if (doc[0] > doc[1] + 1) throw new Error(label + ' page scrolls sideways: ' + doc.join(' vs '));
+  };
+
+  await step('every tab fits the screen with no sideways scrolling', async () => {
+    for (const v of ['v-reg','v-res','v-rel','v-loc','v-acct']) {
+      await m.click(`.tab[data-v="${v}"]`);
+      await m.waitForTimeout(700);
+      await noOverflow(v);
+    }
+  });
+
+  await step('reservations read as stacked cards, not a cut-off table', async () => {
+    await m.click('.tab[data-v="v-res"]');
+    await m.waitForSelector('#resTable tbody tr');
+    const shown = await m.evaluate(() => {
+      const th = document.querySelector('#resTable thead');
+      const td = document.querySelector('#resTable tbody td');
+      return { headHidden: getComputedStyle(th).position === 'absolute',
+               label: td ? getComputedStyle(td, '::before').content : '' };
+    });
+    if (!shown.headHidden) throw new Error('the table header is still rendering on mobile');
+    if (!/CODE|Code/i.test(shown.label)) throw new Error('cells are missing their labels: ' + shown.label);
+  });
+
+  await step('inventory editor fits a phone', async () => {
+    await m.click('.tab[data-v="v-rel"]');
+    await m.waitForSelector('#relTable [data-edit]', { timeout: 15000 });
+    await m.locator('#relTable tbody tr', { hasText: 'Jordan' }).locator('[data-edit]').click();
+    await m.waitForSelector('#v-edit.on');
+    await m.waitForSelector('#qtyStores details', { timeout: 10000 });
+    await noOverflow('release editor');
+    if (!(await m.locator('#qtyStores details').count()))
+      throw new Error('no store sections on mobile');
+    if (!(await m.isVisible('#sumStores'))) throw new Error('no by-store summary on mobile');
+    if (!(await m.isVisible('#sumSizes'))) throw new Error('no by-size summary on mobile');
   });
 
   await step('no console errors anywhere', async () => {

@@ -94,6 +94,43 @@
   .addsize{display:flex; gap:8px; align-items:center; margin-top:12px; max-width:280px}
   .addsize input{width:110px}
 
+  .storeacc{border:1px solid var(--line); border-radius:11px; background:var(--surface-2);
+    margin-bottom:8px; overflow:hidden}
+  .storeacc > summary{list-style:none; cursor:pointer; padding:12px 14px;
+    display:flex; align-items:center; gap:10px; justify-content:space-between}
+  .storeacc > summary::-webkit-details-marker{display:none}
+  .storeacc > summary::after{content:"\25be"; color:var(--muted); font-size:12px;
+    transition:transform .15s; flex:none}
+  .storeacc[open] > summary::after{transform:rotate(180deg)}
+  .storeacc[open] > summary{border-bottom:1px solid var(--line)}
+  .storeacc > summary .nm{font-weight:800; font-size:15px; flex:1; min-width:0;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .storeacc > summary .n{color:var(--muted); font-size:12px; font-weight:700; flex:none}
+  .storeacc > summary .n b{color:var(--text); font-size:14px}
+  .accbody{padding:11px 14px 13px}
+  .accbtns{margin-bottom:10px}
+  .qtyrow{display:flex; align-items:center; gap:10px; padding:7px 11px;
+    border:1px solid var(--line); border-radius:9px; margin-bottom:6px;
+    background:var(--surface)}
+  .qtyrow .sz{font-weight:800; font-size:15px; min-width:52px}
+  .qtyrow .taken{color:var(--warn); font-size:11.5px; font-weight:700}
+  .qtyrow .spacer{flex:1}
+  .qtyrow .across{color:var(--muted); font-size:11.5px; font-weight:600; white-space:nowrap}
+  .qtyrow input{width:72px; padding:7px 6px; text-align:center; font-weight:800; font-size:15px}
+  .qtyrow.has{border-color:#3a3a3a}
+  .sumtitle{font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); margin-bottom:7px}
+  .sumbox{border:1px solid var(--line); border-radius:11px; background:var(--surface-2);
+    padding:6px 12px; max-height:290px; overflow-y:auto}
+  .sumbox div{display:flex; justify-content:space-between; gap:12px; padding:6px 0;
+    font-size:13.5px; border-bottom:1px solid rgba(255,255,255,.05)}
+  .sumbox div:last-child{border-bottom:0}
+  .sumbox .z{color:var(--muted)}
+  .sumbox b{font-variant-numeric:tabular-nums}
+  .grandtotal{margin-top:14px; padding:13px 15px; border-radius:11px;
+    background:var(--surface-2); border:1px solid var(--line);
+    font-weight:800; font-size:15px; display:flex; justify-content:space-between}
+
   .matrix input{width:64px; padding:8px 6px; text-align:center; font-weight:700}
   .matrix td,.matrix th{padding:6px 5px; white-space:nowrap}
   .matrix .locname{font-weight:700; position:sticky; left:0; background:var(--surface); padding-right:14px}
@@ -146,6 +183,76 @@
   .empty{color:var(--muted); text-align:center; padding:40px 20px; font-size:14px}
   .hint{color:var(--muted); font-size:12px; margin-top:6px}
   code{background:var(--surface-2); padding:2px 6px; border-radius:5px; font-size:13px}
+
+  /* ══════════════ phones ══════════════ */
+  @media (max-width: 720px) {
+    body{font-size:14px}
+    .wrap{padding:0 12px 80px}
+    input,select,textarea{padding:9px 11px; font-size:16px}  /* 16px stops iOS zooming on focus */
+    label{font-size:10px; margin-bottom:5px}
+    .f{margin-bottom:11px}
+    .grid{gap:11px}
+    h3{margin:20px 0 9px; font-size:12px}
+    .sub{font-size:12.5px; margin-bottom:14px}
+    .hbar{gap:9px; padding-bottom:10px}
+    .logo{font-size:12px; letter-spacing:.1em; white-space:nowrap}
+    .hbar > span.sub-label{display:none}
+    .who{font-size:11px; gap:8px; min-width:0}
+    .who #whoami{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:34vw}
+    .tab{padding:9px 11px; font-size:13px}
+    .view{padding-top:16px}
+    h2{font-size:19px}
+    .card{padding:14px}
+    .stats{grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px}
+    .stat{padding:11px 12px}
+    .stat b{font-size:20px}
+
+    /* buttons go full width and stack, so nothing is half off-screen */
+    .rowbtns{gap:8px}
+    .rowbtns .btn{flex:1 1 auto; min-width:120px}
+
+    /* tables become stacked cards — no sideways scrolling for the reader */
+    .stacked thead{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0)}
+    .stacked, .stacked tbody, .stacked tr, .stacked td{display:block; width:100%}
+    .stacked tr{
+      border:1px solid var(--line); border-radius:11px; padding:11px 13px;
+      margin-bottom:9px; background:var(--surface-2);
+    }
+    .stacked td{
+      border:0; padding:4px 0; display:flex; gap:12px;
+      align-items:baseline; justify-content:space-between;
+    }
+    .stacked td::before{
+      content:attr(data-l); color:var(--muted); font-size:10px; font-weight:700;
+      letter-spacing:.08em; text-transform:uppercase; flex:none;
+    }
+    .stacked td[data-l=""]{display:block}
+    .stacked td[data-l=""]::before{display:none}
+    .stacked td.actions{
+      display:flex; gap:8px; padding-top:10px; margin-top:6px;
+      border-top:1px solid var(--line); justify-content:flex-start; flex-wrap:wrap;
+    }
+    .stacked td.actions::before{display:none}
+    .stacked td.actions .btn{flex:1 1 auto}
+    .stacked .empty{text-align:center; padding:26px 10px}
+    .stacked td select{width:auto; min-width:140px; padding:7px 9px}
+
+    .qtyrow{padding:6px 9px; gap:8px; margin-bottom:5px}
+    .qtyrow .sz{font-size:14px; min-width:46px}
+    .qtyrow .taken{font-size:10.5px}
+    .qtyrow input{width:70px; padding:6px 4px; font-size:16px}
+    .storeacc > summary{padding:11px 12px}
+    .storeacc > summary .nm{font-size:14px}
+    .accbody{padding:10px 11px 11px}
+    .sumbox{max-height:210px; padding:4px 11px}
+    .sumbox div{font-size:12.5px; padding:5px 0}
+    .grandtotal{font-size:14px; padding:11px 13px}
+    .grid.g2{gap:12px}
+    .chip{padding:11px 14px; font-size:15px}
+    .addsize{max-width:none}
+    .addsize input{flex:1}
+    .reg input#rcode{font-size:26px}
+  }
 </style>
 </head>
 <body>
@@ -167,7 +274,7 @@
 <header>
   <div class="hbar">
     <span class="logo" id="appLogo">CITY JEANS</span>
-    <span style="color:var(--muted);font-size:13px">Drops admin</span>
+    <span class="sub-label" style="color:var(--muted);font-size:13px">Drops admin</span>
     <span class="who"><span id="whoami"></span>
       <button class="btn ghost sm" id="signout">Sign out</button></span>
   </div>
@@ -223,7 +330,7 @@
       <button class="btn ghost sm" id="csv">Export CSV</button>
       <span class="hint" id="rcount"></span>
     </div>
-    <div class="card scroll"><table id="resTable"></table></div>
+    <div class="card scroll"><table id="resTable" class="stacked"></table></div>
   </section>
 
   <!-- RELEASES -->
@@ -234,7 +341,7 @@
       <button class="btn sm" id="newRel">+ New release</button>
       <button class="btn ghost sm" id="refreshRel">Refresh</button>
     </div>
-    <div class="card scroll"><table id="relTable"></table></div>
+    <div class="card scroll"><table id="relTable" class="stacked"></table></div>
   </section>
 
   <!-- EDIT RELEASE -->
@@ -319,14 +426,26 @@
         <p class="hint">Tick the sizes this drop comes in. A size that already has
           reservations can't be unticked.</p>
       </div>
-      <div class="scroll"><table class="matrix" id="matrix"></table></div>
-      <p class="hint" style="margin-top:10px">Type a quantity into any cell. Each
-        store is set independently — use <b>Set row</b> to fill one store across
-        every size, or <b>Set all</b> only if every store really does get the same.</p>
-      <div class="rowbtns" style="margin-top:10px">
-        <button class="btn ghost sm" id="fillAll">Set all stores…</button>
-        <button class="btn ghost sm" id="clearAll">Clear all</button>
-        <span class="hint" id="matrixTotal"></span>
+      <p class="hint" style="margin:16px 0 10px">Open a store and set the quantity for
+        each size. Stores stay open or closed as you like — everything is saved together.</p>
+
+      <div id="qtyStores"></div>
+
+      <h3>Summary</h3>
+      <div class="grid g2">
+        <div>
+          <div class="sumtitle">By store</div>
+          <div class="sumbox" id="sumStores"></div>
+        </div>
+        <div>
+          <div class="sumtitle">By size, across all stores</div>
+          <div class="sumbox" id="sumSizes"></div>
+        </div>
+      </div>
+      <div class="grandtotal" id="matrixTotal"></div>
+      <div class="rowbtns" style="margin-top:12px">
+        <button class="btn ghost sm" id="fillAll">Set every store to the same…</button>
+        <button class="btn ghost sm" id="clearAll">Clear every store</button>
       </div>
     </div>
 
@@ -350,7 +469,7 @@
       </div>
       <button class="btn sm" id="addLoc">Add store</button>
     </div>
-    <div class="card scroll" style="margin-top:12px"><table id="locTable"></table></div>
+    <div class="card scroll" style="margin-top:12px"><table id="locTable" class="stacked"></table></div>
   </section>
 
   <!-- ACCOUNT -->
@@ -390,7 +509,7 @@
       <button class="btn sm" id="invite">Create account</button>
       <div class="msg" id="invmsg"></div>
     </div>
-    <div class="card scroll" style="margin-top:12px"><table id="staffTable"></table></div>
+    <div class="card scroll" style="margin-top:12px"><table id="staffTable" class="stacked"></table></div>
   </section>
 
 </div>
@@ -406,7 +525,7 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt
 let TOKEN = localStorage.getItem("drops_at") || null;
 let REFRESH = localStorage.getItem("drops_rt") || null;
 let EMAIL = localStorage.getItem("drops_em") || "";
-const state = { releases:[], locations:[], reservations:[], editing:null, inv:[] };
+const state = { releases:[], locations:[], reservations:[], editing:null, inv:[], qty:{} };
 
 // Standard size runs. Men's and women's are US; GS/PS/TD are kids' scales.
 const SIZE_RUNS = {
@@ -523,15 +642,15 @@ async function loadStaff() {
   $("staffTable").innerHTML = `<thead><tr><th>Email</th><th>Role</th><th>Note</th>
       <th>Account</th><th></th></tr></thead><tbody>` +
     (rows.length ? rows.map(s => `<tr>
-      <td><b>${esc(s.email)}</b></td>
-      <td>${esc(s.role)}</td>
-      <td class="hint">${esc(s.note || "—")}</td>
-      <td>${s.has_account ? '<span class="pill p-open">Set up</span>'
-                          : '<span class="pill p-draft">Invited</span>'}</td>
-      <td class="rowbtns">
+      <td data-l="Email"><b>${esc(s.email)}</b></td>
+      <td data-l="Role">${esc(s.role)}</td>
+      <td data-l="Note" class="hint">${esc(s.note || "—")}</td>
+      <td data-l="Account">${s.has_account ? '<span class="pill p-open">Set up</span>'
+                          : '<span class="pill p-draft">No account yet</span>'}</td>
+      <td class="actions">
         ${s.has_account ? `<button class="btn ghost sm" data-reset="${esc(s.email)}">Reset password</button>` : ""}
         <button class="btn danger sm" data-rev="${esc(s.email)}">Revoke</button></td>
-    </tr>`).join("") : `<tr><td colspan="5" class="empty">Nobody invited yet.</td></tr>`) + `</tbody>`;
+    </tr>`).join("") : `<tr><td colspan="5" data-l="" class="empty">Nobody added yet.</td></tr>`) + `</tbody>`;
   $("staffTable").querySelectorAll("[data-reset]").forEach(b => b.onclick = async () => {
     const m = $("invmsg"), pass = makePassword();
     if (!confirm(`Reset the password for ${b.dataset.reset}?`)) return;
@@ -704,11 +823,13 @@ async function loadLocations() {
   $("locTable").innerHTML = `<thead><tr><th>Store</th><th>Address</th><th>Phone</th>
       <th>Live</th><th></th></tr></thead><tbody>` +
     (state.locations.length ? state.locations.map(l => `<tr>
-      <td><b>${esc(l.name)}</b></td><td>${esc(l.address||"—")}</td><td>${esc(l.phone||"—")}</td>
-      <td>${l.active ? '<span class="pill p-open">Yes</span>' : '<span class="pill p-draft">No</span>'}</td>
-      <td><button class="btn ghost sm" data-tog="${l.id}" data-a="${l.active}">
-        ${l.active ? "Hide" : "Show"}</button></td></tr>`).join("")
-      : `<tr><td colspan="5" class="empty">No stores yet — add your first one above.</td></tr>`) +
+      <td data-l="Store"><b>${esc(l.name)}</b></td>
+      <td data-l="Address">${esc(l.address||"—")}</td>
+      <td data-l="Phone">${esc(l.phone||"—")}</td>
+      <td data-l="Live">${l.active ? '<span class="pill p-open">Yes</span>' : '<span class="pill p-draft">No</span>'}</td>
+      <td class="actions"><button class="btn ghost sm" data-tog="${l.id}" data-a="${l.active}">
+        ${l.active ? "Hide from customers" : "Show to customers"}</button></td></tr>`).join("")
+      : `<tr><td colspan="5" data-l="" class="empty">No stores yet — add your first one above.</td></tr>`) +
     `</tbody>`;
   $("locTable").querySelectorAll("[data-tog]").forEach(b => b.onclick = async () => {
     await rest("locations?id=eq." + b.dataset.tog, { method:"PATCH",
@@ -742,12 +863,13 @@ async function loadReleases() {
     (state.releases.length ? state.releases.map(r => {
       const a = agg[r.id] || { t:0, u:0 };
       return `<tr>
-        <td><b>${esc(r.name)}</b><br><span class="hint">${esc(r.slug)}</span></td>
-        <td><span class="pill p-${r.status}">${r.status}</span></td>
-        <td>${r.mode === "raffle" ? "Raffle" : "First come"}</td>
-        <td><b>${a.u}</b> <span class="hint">/ ${a.t}</span></td>
-        <td><button class="btn ghost sm" data-edit="${r.id}">Edit</button></td></tr>`;
-    }).join("") : `<tr><td colspan="5" class="empty">No releases yet.</td></tr>`) + `</tbody>`;
+        <td data-l="Release"><span style="text-align:right"><b>${esc(r.name)}</b><br>
+          <span class="hint">${esc(r.slug)}</span></span></td>
+        <td data-l="Status"><span class="pill p-${r.status}">${r.status}</span></td>
+        <td data-l="Mode">${r.mode === "raffle" ? "Raffle" : "First come"}</td>
+        <td data-l="Reserved"><b>${a.u}</b> <span class="hint">/ ${a.t}</span></td>
+        <td class="actions"><button class="btn ghost sm" data-edit="${r.id}">Edit this release</button></td></tr>`;
+    }).join("") : `<tr><td colspan="5" data-l="" class="empty">No releases yet.</td></tr>`) + `</tbody>`;
   $("relTable").querySelectorAll("[data-edit]").forEach(b =>
     b.onclick = () => editRelease(state.releases.find(r => r.id === b.dataset.edit)));
   fillSelect($("fRel"), state.releases, "All releases");
@@ -797,6 +919,7 @@ async function editRelease(rel) {
     state.picked = new Set(state.pool);
   }
   paintChips();
+  seedQty();
   buildMatrix();
   go("v-edit");
 }
@@ -808,10 +931,10 @@ $("fName").addEventListener("input", () => {
     .replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60);
 });
 
-$("sizesAll").onclick  = () => { state.pool.forEach(s => state.picked.add(s)); paintChips(); buildMatrix(); };
+$("sizesAll").onclick  = () => { state.pool.forEach(s => state.picked.add(s)); paintChips(); paintStore(); };
 $("sizesNone").onclick = () => {
   state.pool.forEach(s => { if (takenFor(s) === 0) state.picked.delete(s); });
-  paintChips(); buildMatrix();
+  paintChips(); paintStore();
 };
 $("addSizeBtn").onclick = () => {
   const v = $("addSize").value.trim().toUpperCase();
@@ -819,7 +942,7 @@ $("addSizeBtn").onclick = () => {
   if (!state.pool.includes(v)) state.pool.push(v);
   state.picked.add(v);
   $("addSize").value = "";
-  paintChips(); buildMatrix();
+  paintChips(); paintStore();
 };
 $("addSize").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("addSizeBtn").click(); } });
 
@@ -853,7 +976,7 @@ function paintChips() {
       ev.preventDefault();
       if (c.classList.contains("locked")) return;
       state.picked.has(sz) ? state.picked.delete(sz) : state.picked.add(sz);
-      paintChips(); buildMatrix();
+      paintChips(); paintStore();
     };
   });
   const n = sizeRun().length;
@@ -866,58 +989,135 @@ function setPool(sizes, pickAll) {
   if (pickAll) state.picked = new Set(state.pool);
   paintChips();
 }
+// ── quantity: a stacked, openable list of stores ─────────────────────────────
+// state.qty is the single source of truth: { "<locationId>|<size>": n }.
+const qk = (loc, sz) => loc + "|" + sz;
+const qGet = (loc, sz) => Number(state.qty[qk(loc, sz)] || 0);
+const activeLocs = () => state.locations.filter(l => l.active);
+
+function seedQty() {
+  state.qty = {};
+  state.inv.forEach(r => { state.qty[qk(r.location_id, r.size)] = r.quantity_total; });
+}
+
+function takenAt(loc, sz) {
+  const r = state.inv.find(x => x.location_id === loc && x.size === sz);
+  return r ? r.quantity_reserved : 0;
+}
+
+const storeTotal = loc => sizeRun().reduce((a, sz) => a + qGet(loc, sz), 0);
+const sizeTotal  = sz  => activeLocs().reduce((a, l) => a + qGet(l.id, sz), 0);
+
 function buildMatrix() {
-  const sizes = sizeRun(), locs = state.locations.filter(l => l.active);
+  const locs = activeLocs(), sizes = sizeRun();
+  const host = $("qtyStores");
+
   if (!locs.length) {
-    $("matrix").innerHTML = `<tr><td class="empty">Add a store first, on the Stores tab.</td></tr>`;
-    return;
+    host.innerHTML = `<p class="empty">Add a store first, on the Stores tab.</p>`;
+    paintSummary(); return;
   }
-  const get = (lid, s) => state.inv.find(r => r.location_id === lid && r.size === s);
-  $("matrix").innerHTML =
-    `<thead><tr><th class="locname">Store</th>${sizes.map(s => `<th style="text-align:center">${esc(s)}</th>`).join("")}
-      <th style="text-align:center">Total</th><th></th></tr></thead><tbody>` +
-    locs.map(l => `<tr data-row="${l.id}"><td class="locname">${esc(l.name)}</td>` +
-      sizes.map(s => { const r = get(l.id, s);
-        return `<td><input type="number" min="0" inputmode="numeric" value="${r ? r.quantity_total : 0}"
-          data-loc="${l.id}" data-size="${esc(s)}">
-          ${r && r.quantity_reserved ? `<span class="used">${r.quantity_reserved} taken</span>` : ""}</td>`;
-      }).join("") +
-      `<td style="text-align:center"><b class="rowtot">0</b></td>
-       <td><button class="btn ghost sm" data-fillrow="${l.id}">Set row</button></td></tr>`).join("") +
-    `</tbody>`;
-  $("matrix").querySelectorAll("input").forEach(i => i.addEventListener("input", tally));
-  $("matrix").querySelectorAll("[data-fillrow]").forEach(b => b.onclick = () => {
-    const loc = state.locations.find(l => l.id === b.dataset.fillrow);
-    const n = prompt(`How many of each size at ${loc ? loc.name : "this store"}?`, "2");
+  if (!sizes.length) {
+    host.innerHTML = `<p class="empty">Tick at least one size above.</p>`;
+    paintSummary(); return;
+  }
+
+  // remember which stores were open across a re-render
+  const wasOpen = new Set([...host.querySelectorAll("details[open]")].map(d => d.dataset.row));
+  const firstRender = !host.querySelector("details");
+
+  host.innerHTML = locs.map(l => {
+    const n = storeTotal(l.id);
+    const open = firstRender ? n > 0 : wasOpen.has(l.id);
+    return `<details class="storeacc" data-row="${l.id}"${open ? " open" : ""}>
+      <summary>
+        <span class="nm">${esc(l.name)}</span>
+        <span class="n"><b class="rowtot">${n}</b> pairs</span>
+      </summary>
+      <div class="accbody">
+        <div class="rowbtns accbtns">
+          <button type="button" class="btn ghost sm" data-fillrow="${l.id}">Set every size…</button>
+          <button type="button" class="btn ghost sm" data-clearrow="${l.id}">Clear this store</button>
+        </div>
+        ${sizes.map(sz => {
+          const v = qGet(l.id, sz), taken = takenAt(l.id, sz);
+          return `<div class="qtyrow${v ? " has" : ""}">
+            <span class="sz">${esc(sz)}</span>
+            ${taken ? `<span class="taken">${taken} reserved</span>` : ""}
+            <span class="spacer"></span>
+            <input type="number" min="0" inputmode="numeric" value="${v}"
+              data-loc="${l.id}" data-size="${esc(sz)}"
+              aria-label="${esc(l.name)} size ${esc(sz)}">
+          </div>`;
+        }).join("")}
+      </div>
+    </details>`;
+  }).join("");
+
+  host.querySelectorAll("input").forEach(i => i.addEventListener("input", () => {
+    const n = Math.max(0, parseInt(i.value) || 0);
+    state.qty[qk(i.dataset.loc, i.dataset.size)] = n;
+    i.closest(".qtyrow").classList.toggle("has", n > 0);
+    paintSummary();
+  }));
+
+  host.querySelectorAll("[data-fillrow]").forEach(b => b.onclick = () => {
+    const loc = b.dataset.fillrow;
+    const store = state.locations.find(l => l.id === loc);
+    const n = prompt(`How many of each size at ${store ? store.name : "this store"}?`, "2");
     if (n === null) return;
     const v = Math.max(0, parseInt(n) || 0);
-    $("matrix").querySelectorAll(`tr[data-row="${b.dataset.fillrow}"] input`)
-      .forEach(i => i.value = v);
-    tally();
+    sizeRun().forEach(sz => { state.qty[qk(loc, sz)] = v; });
+    buildMatrix();
   });
-  tally();
-}
-function tally() {
-  let grand = 0;
-  $("matrix").querySelectorAll("tbody tr").forEach(tr => {
-    let t = 0;
-    tr.querySelectorAll("input").forEach(i => t += Number(i.value) || 0);
-    const b = tr.querySelector(".rowtot"); if (b) b.textContent = t;
-    grand += t;
+
+  host.querySelectorAll("[data-clearrow]").forEach(b => b.onclick = () => {
+    const loc = b.dataset.clearrow;
+    sizeRun().forEach(sz => { if (takenAt(loc, sz) === 0) state.qty[qk(loc, sz)] = 0; });
+    buildMatrix();
   });
-  $("matrixTotal").textContent = grand + " pairs loaded in total";
+
+  paintSummary();
 }
+
+function paintSummary() {
+  const locs = activeLocs(), sizes = sizeRun();
+
+  $("qtyStores").querySelectorAll("details[data-row]").forEach(d => {
+    const b = d.querySelector(".rowtot");
+    if (b) b.textContent = storeTotal(d.dataset.row);
+  });
+
+  $("sumStores").innerHTML = locs.length ? locs.map(l => {
+    const n = storeTotal(l.id);
+    return `<div class="${n ? "" : "z"}"><span>${esc(l.name)}</span><b>${n}</b></div>`;
+  }).join("") : `<div class="z"><span>No stores</span></div>`;
+
+  $("sumSizes").innerHTML = sizes.length ? sizes.map(sz => {
+    const n = sizeTotal(sz);
+    return `<div class="${n ? "" : "z"}"><span>Size ${esc(sz)}</span><b>${n}</b></div>`;
+  }).join("") : `<div class="z"><span>No sizes selected</span></div>`;
+
+  const grand = locs.reduce((a, l) => a + storeTotal(l.id), 0);
+  $("matrixTotal").innerHTML =
+    `<span>Total loaded for this release</span><span>${grand} pair${grand === 1 ? "" : "s"}</span>`;
+}
+
+const paintStore = buildMatrix;   // size ticks re-render the whole stack
+
 $("fillAll").onclick = () => {
   const n = prompt("Set EVERY size at EVERY store to how many?\n\n" +
-    "Most drops are not spread evenly — use \u201cSet row\u201d per store instead " +
-    "if the allocation differs.", "2");
+    "Most drops are not spread evenly \u2014 pick a store above and use " +
+    "\u201cSet every size\u201d instead if the allocation differs.", "2");
   if (n === null) return;
-  $("matrix").querySelectorAll("input").forEach(i => i.value = Math.max(0, parseInt(n) || 0));
-  tally();
+  const v = Math.max(0, parseInt(n) || 0);
+  activeLocs().forEach(l => sizeRun().forEach(sz => { state.qty[qk(l.id, sz)] = v; }));
+  buildMatrix();
 };
 $("clearAll").onclick = () => {
-  $("matrix").querySelectorAll("input").forEach(i => i.value = 0);
-  tally();
+  activeLocs().forEach(l => sizeRun().forEach(sz => {
+    if (takenAt(l.id, sz) === 0) state.qty[qk(l.id, sz)] = 0;
+  }));
+  buildMatrix();
 };
 
 // photo upload
@@ -988,9 +1188,11 @@ $("saveRel").onclick = async () => {
     // inventory diff
     const existing = await rest(`release_inventory?select=*&release_id=eq.${rel.id}`);
     const key = (l,s) => l + "|" + s;
+    // Every active store x every ticked size, from state.qty — not just the
+    // store currently visible in the dropdown.
     const now = new Map();
-    $("matrix").querySelectorAll("input").forEach(i =>
-      now.set(key(i.dataset.loc, i.dataset.size), Number(i.value) || 0));
+    activeLocs().forEach(l => sizeRun().forEach(sz =>
+      now.set(key(l.id, sz), qGet(l.id, sz))));
     const order = {}; sizeRun().forEach((s,i) => order[s] = i);
 
     const inserts = [], problems = [];
@@ -1029,6 +1231,7 @@ $("saveRel").onclick = async () => {
       ? " Note: couldn't lower " + esc(problems.join("; ")) + "." : "");
     await loadReleases();
     state.inv = await rest(`release_inventory?select=*&release_id=eq.${rel.id}`);
+    seedQty();
     buildMatrix();
   } catch (e) {
     m.className = "msg err show";
@@ -1071,20 +1274,20 @@ function paintReservations() {
   $("resTable").innerHTML = `<thead><tr><th>Code</th><th>Customer</th><th>Size</th>
       <th>Store</th><th>Release</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>` +
     (rows.length ? rows.map(r => `<tr>
-      <td><b>${esc(r.code)}</b></td>
-      <td>${esc(r.first_name)} ${esc(r.last_name)}<br>
-        <span class="hint">${esc(r.email)} · ${esc(r.phone)}</span></td>
-      <td><b>${esc(r.size)}</b></td>
-      <td>${esc(locName(r.location_id))}</td>
-      <td>${esc(relName(r.release_id))}</td>
-      <td><span class="pill p-${r.status}">${r.status.replace("_"," ")}</span></td>
-      <td class="hint">${new Date(r.created_at).toLocaleDateString([], {month:"short",day:"numeric"})}
+      <td data-l="Code"><b>${esc(r.code)}</b></td>
+      <td data-l="Customer"><span style="text-align:right">${esc(r.first_name)} ${esc(r.last_name)}<br>
+        <span class="hint">${esc(r.email)}<br>${esc(r.phone)}</span></span></td>
+      <td data-l="Size"><b>${esc(r.size)}</b></td>
+      <td data-l="Store">${esc(locName(r.location_id))}</td>
+      <td data-l="Release">${esc(relName(r.release_id))}</td>
+      <td data-l="Status"><span class="pill p-${r.status}">${r.status.replace("_"," ")}</span></td>
+      <td data-l="When" class="hint">${new Date(r.created_at).toLocaleDateString([], {month:"short",day:"numeric"})}
         ${new Date(r.created_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}</td>
-      <td><select data-st="${r.id}" style="padding:6px 8px;font-size:12px">
+      <td class="actions"><select data-st="${r.id}" style="padding:6px 8px;font-size:12px">
         ${["confirmed","picked_up","no_show","cancelled"].map(s =>
           `<option value="${s}"${s===r.status?" selected":""}>${s.replace("_"," ")}</option>`).join("")}
       </select></td></tr>`).join("")
-      : `<tr><td colspan="8" class="empty">Nothing here yet.</td></tr>`) + `</tbody>`;
+      : `<tr><td colspan="8" data-l="" class="empty">Nothing here yet.</td></tr>`) + `</tbody>`;
 
   $("resTable").querySelectorAll("[data-st]").forEach(sel => sel.onchange = async () => {
     const patch = { status: sel.value };
