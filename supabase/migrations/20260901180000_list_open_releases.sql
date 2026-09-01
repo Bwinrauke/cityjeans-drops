@@ -1,0 +1,4 @@
+-- Several drops can be open at once — a men's release, a GS release and a
+-- women's release often share a preorder window. The customer page needs them
+-- all in one call, with a sold-out flag but never a count. See
+-- public.list_open_releases() as applied to the project.

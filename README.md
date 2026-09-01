@@ -23,10 +23,17 @@ Two static HTML pages talk directly to Supabase with a publishable key. There is
 no server to run and no build step — the security lives in Postgres row-level
 security and three RPC functions, not in a backend the pages could bypass.
 
-**`docs/index.html` — the customer app.** Photo → size → pickup store →
-name/email/phone → a confirmation ticket with a large code and a QR, designed to
-be screenshotted and shown at the register. Stock refreshes every 20 seconds
-while they decide. A lookup flow (code + email) recovers a lost screenshot.
+**`docs/index.html` — the customer app.** Opens on a list of every release that
+is currently taking reservations — men's, women's and GS drops routinely overlap,
+and each carries its own size scale, pickup window and stock. Tapping one goes
+photo → size → pickup store → name/email/phone → a confirmation ticket with a
+large code and a QR, designed to be screenshotted and shown at the register. A
+link with `?release=<slug>` opens that drop directly and skips the list. A lookup
+flow (code + email) recovers a lost screenshot.
+
+Customers never see quantities: sizes read Available or Gone, and anonymous
+access to `release_inventory` is withdrawn in favour of `get_availability()`,
+which returns booleans.
 
 **`docs/admin.html` — the back office.**
 
@@ -80,7 +87,7 @@ docs/                      the two pages + config
 supabase/migrations/       schema, RLS, RPCs, seed data (in apply order)
 supabase/functions/app/    edge function that serves the pages off Supabase
 scripts/deploy_web.sh      push docs/ to the Supabase storage bucket
-test/e2e_test.js           22-check browser test against the live backend
+test/e2e_test.js           44-check browser test against the live backend
 ```
 
 ---

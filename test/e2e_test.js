@@ -186,6 +186,59 @@ const { chromium, devices } = require('playwright');
     await page.waitForSelector('#lerr.show', { timeout: 8000 });
   });
 
+  console.log('\n--- MULTIPLE RELEASES ---');
+  await step('the landing page lists every open release', async () => {
+    await page.goto('http://localhost:8900/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#s-list.active', { timeout: 15000 });
+    const n = await page.locator('#rels .rel').count();
+    if (n < 2) throw new Error('only ' + n + ' releases listed');
+    const txt = await page.textContent('#rels');
+    if (!/Men's/.test(txt) || !/Grade School/.test(txt))
+      throw new Error('size scales not shown on the cards: ' + txt.slice(0, 160));
+    if (/\d+\s*(left|pairs? left)/i.test(txt))
+      throw new Error('the release list leaks stock counts');
+    const sub = await page.textContent('#listSub');
+    if (!/releases open/.test(sub)) throw new Error('listSub = ' + sub);
+  });
+
+  await step('opening a release shows its own size scale, and back returns', async () => {
+    const first = await page.locator('#rels .rel .nm').first().textContent();
+    await page.locator('#rels .rel').first().click();
+    await page.waitForSelector('#s-size.active', { timeout: 15000 });
+    const name = await page.textContent('#name');
+    if (name.trim() !== first.trim()) throw new Error(`opened "${name}" after tapping "${first}"`);
+    const scaleA = await page.textContent('#sizeSub');
+
+    await page.click('#back');
+    await page.waitForSelector('#s-list.active', { timeout: 10000 });
+
+    await page.locator('#rels .rel').nth(1).click();
+    await page.waitForSelector('#s-size.active', { timeout: 15000 });
+    const scaleB = await page.textContent('#sizeSub');
+    if (scaleA === scaleB)
+      throw new Error('both releases show the same size scale: ' + scaleA);
+    const sizesB = await page.textContent('#sizes');
+    if (!sizesB.trim()) throw new Error('the second release has no sizes');
+  });
+
+  await step('a direct release link still skips the list', async () => {
+    await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club',
+      { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#s-size.active', { timeout: 15000 });
+    if (await page.isVisible('#s-list')) throw new Error('the list showed for a direct link');
+    const name = await page.textContent('#name');
+    if (!/Flight Club/.test(name)) throw new Error('wrong release: ' + name);
+  });
+
+  await step('lookup is reachable from the list', async () => {
+    await page.goto('http://localhost:8900/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#s-list.active', { timeout: 15000 });
+    await page.click('#listLookup');
+    await page.waitForSelector('#s-lookup.active', { timeout: 10000 });
+    await page.click('#back');
+    await page.waitForSelector('#s-list.active', { timeout: 10000 });
+  });
+
   console.log('\n--- ADMIN ---');
   const page2 = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   await block(page2);
@@ -227,7 +280,7 @@ const { chromium, devices } = require('playwright');
   await step('release editor loads the quantity editor', async () => {
     await page2.click('.tab[data-v="v-rel"]');
     await page2.waitForSelector('#relTable [data-edit]');
-    await page2.locator('#relTable tbody tr', { hasText: 'Jordan' }).locator('[data-edit]').click();
+    await page2.locator('#relTable tbody tr', { hasText: 'Flight Club' }).locator('[data-edit]').click();
     await page2.waitForSelector('#v-edit.on');
     await page2.waitForSelector('#qtyStores details', { timeout: 15000 });
     const stores = await page2.locator('#qtyStores details').count();
@@ -369,7 +422,7 @@ const { chromium, devices } = require('playwright');
   await step('size run is checkboxes, and reserved sizes are locked', async () => {
     await page2.click('.tab[data-v="v-rel"]');
     await page2.waitForSelector('#relTable [data-edit]');
-    await page2.locator('#relTable tbody tr', { hasText: 'Jordan' }).locator('[data-edit]').click();
+    await page2.locator('#relTable tbody tr', { hasText: 'Flight Club' }).locator('[data-edit]').click();
     await page2.waitForSelector('#sizeChips .chip');
     if (await page2.locator('#fSizes').count()) throw new Error('the free-text size box is still there');
     await page2.waitForSelector('#qtyStores .qtyrow', { timeout: 15000 });
@@ -538,7 +591,7 @@ const { chromium, devices } = require('playwright');
   await step('inventory editor fits a phone', async () => {
     await m.click('.tab[data-v="v-rel"]');
     await m.waitForSelector('#relTable [data-edit]', { timeout: 15000 });
-    await m.locator('#relTable tbody tr', { hasText: 'Jordan' }).locator('[data-edit]').click();
+    await m.locator('#relTable tbody tr', { hasText: 'Flight Club' }).locator('[data-edit]').click();
     await m.waitForSelector('#v-edit.on');
     await m.waitForSelector('#qtyStores details', { timeout: 10000 });
     await noOverflow('release editor');

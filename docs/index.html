@@ -72,6 +72,32 @@
   h2{font-size:17px; font-weight:700; margin:26px 0 4px; letter-spacing:-.01em}
   .sub{color:var(--muted); font-size:13px; margin:0 0 14px}
 
+  /* ── release list ── */
+  .rel{
+    display:flex; gap:14px; align-items:center; width:100%; text-align:left;
+    background:var(--surface); border:1.5px solid var(--line); color:var(--text);
+    border-radius:var(--radius); padding:12px; font:inherit; margin-bottom:11px;
+    cursor:pointer; transition:.14s;
+  }
+  .rel:active{transform:scale(.99)}
+  .rel img{width:84px; height:84px; border-radius:11px; object-fit:cover;
+    background:var(--surface-2); flex:none}
+  .rel .ph{width:84px; height:84px; border-radius:11px; background:var(--surface-2);
+    display:flex; align-items:center; justify-content:center; font-size:30px; flex:none}
+  .rel .body{flex:1; min-width:0}
+  .rel .nm{font-weight:800; font-size:15px; line-height:1.25}
+  .rel .sub2{color:var(--muted); font-size:12.5px; margin-top:3px}
+  .rel .row{display:flex; align-items:center; gap:7px; margin-top:7px; flex-wrap:wrap}
+  .tagp{
+    display:inline-block; padding:3px 9px; border-radius:99px; font-size:10px;
+    font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    background:var(--surface-2); color:var(--muted); border:1px solid var(--line);
+  }
+  .tagp.price{background:transparent; color:var(--text); border-color:var(--line)}
+  .tagp.gone{background:#3a1e1e; color:#ff9c9c; border-color:#6b2c2c}
+  .rel .go{color:var(--muted); font-size:20px; flex:none}
+  .rel.out{opacity:.5}
+
   /* ── size grid ── */
   .sizes{display:grid; grid-template-columns:repeat(4,1fr); gap:9px}
   .size{
@@ -220,6 +246,14 @@
       </div>
     </section>
 
+    <!-- 0. all open releases -->
+    <section class="screen" id="s-list">
+      <h1 style="margin:24px 0 4px">Reserve a pair</h1>
+      <p class="sub" id="listSub">Pick a release below.</p>
+      <div id="rels"></div>
+      <p class="link">Already reserved? <a id="listLookup">Look it up</a></p>
+    </section>
+
     <!-- 1. product + size -->
     <section class="screen" id="s-size">
       <div class="hero" id="hero"></div>
@@ -305,7 +339,7 @@
       body: JSON.stringify(body)
     }).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t))));
 
-  const S = { release:null, locations:[], inv:[], size:null, loc:null, step:0 };
+  const S = { release:null, releases:[], locations:[], inv:[], size:null, loc:null, step:0 };
   const money = n => n == null ? "" : "$" + Number(n).toFixed(Number(n) % 1 ? 2 : 0);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 
@@ -326,12 +360,16 @@
 
   // ── navigation ──────────────────────────────────────────────
   const SCREENS = ["s-size","s-loc","s-info","s-done"];
+  const SCALE_SHORT = { mens:"Men's", womens:"Women's", gs:"Grade School",
+                        ps:"Preschool", td:"Toddler", unisex:"Unisex" };
   function show(id, step) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
     $(id).classList.add("active");
     window.scrollTo(0, 0);
     if (typeof step === "number") S.step = step;
-    $("back").classList.toggle("show", id !== "s-done" && (S.step > 0 || id === "s-lookup"));
+    const canGoBack = id === "s-lookup" || S.step > 0 ||
+                      (id === "s-size" && S.releases.length > 1);
+    $("back").classList.toggle("show", id !== "s-done" && canGoBack);
     $("steps").style.visibility = SCREENS.includes(id) ? "visible" : "hidden";
     [...$("steps").children].forEach((d, i) => d.classList.toggle("on", i <= S.step));
     paintBar(id);
@@ -352,6 +390,7 @@
   function paintBar(id) {
     const bar = $("bar"), cta = $("cta"), cta2 = $("cta2");
     cta2.style.display = "none";
+    if (id === "s-list") { bar.style.display = "none"; requestAnimationFrame(fitBar); return; }
     if (id === "s-size") {
       bar.style.display = "block"; cta.textContent = "Continue";
       cta.disabled = !S.size; cta2.style.display = "block";
@@ -370,9 +409,10 @@
 
   $("back").onclick = () => {
     const cur = document.querySelector(".screen.active").id;
-    if (cur === "s-lookup") return show("s-size", 0);
+    if (cur === "s-lookup") return show(S.releases.length > 1 ? "s-list" : "s-size", 0);
     if (cur === "s-info") return show("s-loc", 1);
     if (cur === "s-loc")  return show("s-size", 0);
+    if (cur === "s-size" && S.releases.length > 1) return show("s-list", 0);
   };
 
   // ── availability helpers ────────────────────────────────────
@@ -392,6 +432,45 @@
     .sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
 
   // ── render ──────────────────────────────────────────────────
+  function paintReleases() {
+    const n = S.releases.length;
+    $("listSub").textContent = n === 1
+      ? "One release open right now."
+      : `${n} releases open right now — they run on their own windows.`;
+    $("rels").innerHTML = S.releases.map((r, i) => {
+      const scale = SCALE_SHORT[r.size_scale] || SCALE_SHORT.mens;
+      const pu = when(r.pickup_starts_at, r.pickup_ends_at);
+      return `<button class="rel${r.available ? "" : " out"}" data-i="${i}">
+        ${r.photo_url ? `<img src="${esc(r.photo_url)}" alt="">` : `<span class="ph">👟</span>`}
+        <div class="body">
+          <div class="nm">${esc(r.name)}</div>
+          ${pu ? `<div class="sub2">Pickup ${esc(pu)}</div>` : ""}
+          <div class="row">
+            <span class="tagp">${esc(scale)}</span>
+            ${r.retail_price != null ? `<span class="tagp price">${money(r.retail_price)}</span>` : ""}
+            ${r.available ? "" : `<span class="tagp gone">Fully reserved</span>`}
+          </div>
+        </div>
+        <span class="go">›</span>
+      </button>`;
+    }).join("");
+    $("rels").querySelectorAll(".rel").forEach(b => b.onclick = () => {
+      openRelease(S.releases[Number(b.dataset.i)], b);
+    });
+  }
+
+  async function openRelease(rel, btn) {
+    S.release = rel; S.size = null; S.loc = null; S.inv = [];
+    document.title = rel.name + " — Reserve";
+    if (btn) { btn.style.opacity = ".55"; btn.style.pointerEvents = "none"; }
+    // Load availability before showing the screen, so the size grid is never
+    // briefly empty.
+    try { await loadInventory(); } catch {}
+    if (btn) { btn.style.opacity = ""; btn.style.pointerEvents = ""; }
+    paintProduct();
+    show("s-size", 0);
+  }
+
   function paintProduct() {
     const r = S.release;
     document.title = r.name + " — Reserve";
@@ -500,6 +579,7 @@
   // ── actions ─────────────────────────────────────────────────
   $("cta2").onclick = () => { $("lerr").classList.remove("show"); show("s-lookup", 0); };
   $("startOver").onclick = () => location.reload();
+  $("listLookup").onclick = () => { $("lerr").classList.remove("show"); show("s-lookup", 0); };
 
   $("cta").onclick = async () => {
     const cur = document.querySelector(".screen.active").id;
@@ -563,22 +643,38 @@
     $("logo").textContent = CFG.BRAND;
     try {
       const slug = new URLSearchParams(location.search).get("release");
-      const q = slug
-        ? `releases?select=*&slug=eq.${encodeURIComponent(slug)}&limit=1`
-        : `releases?select=*&status=eq.open&order=created_at.desc&limit=1`;
-      const [rel, locs] = await Promise.all([api(q), api("locations?select=*&active=eq.true&order=sort_order")]);
-      if (!rel.length) return show("s-none");
-      S.release = rel[0]; S.locations = locs;
-      await loadInventory();
-      paintProduct();
-      show("s-size", 0);
+      const [rels, locs] = await Promise.all([
+        rpc("list_open_releases", {}),
+        api("locations?select=*&active=eq.true&order=sort_order")
+      ]);
+      S.releases = Array.isArray(rels) ? rels : [];
+      S.locations = locs;
+
+      // A link to one specific drop skips the list; otherwise several drops can
+      // be open at once (men's, women's and GS often overlap), so show them all.
+      const picked = slug ? S.releases.find(r => r.slug === slug) : null;
+      if (slug && !picked) {
+        const one = await api(`releases?select=*&slug=eq.${encodeURIComponent(slug)}&limit=1`);
+        if (!one.length) return show("s-none");
+        S.releases = one; await openRelease(one[0]);
+      } else if (picked) {
+        S.releases = [picked]; await openRelease(picked);
+      } else if (S.releases.length === 0) {
+        return show("s-none");
+      } else if (S.releases.length === 1) {
+        await openRelease(S.releases[0]);
+      } else {
+        paintReleases();
+        show("s-list", 0);
+      }
+
       // keep availability fresh while the customer decides
       setInterval(async () => {
         const cur = document.querySelector(".screen.active").id;
         if (cur !== "s-size" && cur !== "s-loc") return;
         try { await loadInventory(); paintSizes(); if (cur === "s-loc") paintLocs(); } catch {}
       }, 20000);
-    } catch (e) {
+  } catch (e) {
       $("s-load").innerHTML = `<div class="center"><h3>Couldn't load</h3>
         <p>Check your connection and refresh.</p></div>`;
     }
