@@ -184,6 +184,11 @@
   .stat span{color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase}
   .empty{color:var(--muted); text-align:center; padding:40px 20px; font-size:14px}
   .hint{color:var(--muted); font-size:12px; margin-top:6px}
+  .chk{display:inline-flex; align-items:center; gap:7px; color:var(--muted);
+    font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap}
+  .chk input{width:auto; margin:0; accent-color:var(--accent)}
+  tr.arch{opacity:.5}
+  .p-archived-row{background:#2a2a2a; color:#999}
   code{background:var(--surface-2); padding:2px 6px; border-radius:5px; font-size:13px}
 
   /* ══════════════ phones ══════════════ */
@@ -330,8 +335,11 @@
     <div class="rowbtns" style="margin-bottom:14px">
       <button class="btn ghost sm" id="refreshRes">Refresh</button>
       <button class="btn ghost sm manager-only" id="csv">Export CSV</button>
+      <label class="chk manager-only"><input type="checkbox" id="showArch"> Show archived</label>
+      <button class="btn ghost sm manager-only" id="archBulk">Archive these…</button>
       <span class="hint" id="rcount"></span>
     </div>
+    <div class="msg" id="archmsg"></div>
     <div class="card scroll"><table id="resTable" class="stacked"></table></div>
   </section>
 
@@ -1321,10 +1329,12 @@ async function loadReservations() {
   if ($("fRel").value)  p.push("release_id=eq." + $("fRel").value);
   if ($("fLoc").value)  p.push("location_id=eq." + $("fLoc").value);
   if ($("fStat").value) p.push("status=eq." + $("fStat").value);
+  // archived rows are hidden unless the box is ticked
+  if (!$("showArch").checked) p.push("archived_at=is.null");
   state.reservations = await rest("reservations?" + p.join("&"));
   paintReservations();
 }
-["fRel","fLoc","fStat"].forEach(id => $(id).addEventListener("change", loadReservations));
+["fRel","fLoc","fStat","showArch"].forEach(id => $(id).addEventListener("change", loadReservations));
 $("fQ").addEventListener("input", paintReservations);
 $("refreshRes").onclick = loadReservations;
 $("refreshRel").onclick = loadReleases;
@@ -1338,16 +1348,19 @@ function paintReservations() {
       .join(" ").toLowerCase().includes(q));
 
   const n = s => state.reservations.filter(r => r.status === s).length;
+  const arch = state.reservations.filter(r => r.archived_at).length;
   $("rstats").innerHTML = [
     ["Total", state.reservations.length], ["Confirmed", n("confirmed")],
     ["Picked up", n("picked_up")], ["No show", n("no_show")]
-  ].map(([k,v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join("");
+  ].concat(arch ? [["Archived", arch]] : [])
+   .map(([k,v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join("");
   $("rcount").textContent = rows.length + " shown";
 
   $("resTable").innerHTML = `<thead><tr><th>Code</th><th>Customer</th><th>Size</th>
       <th>Store</th><th>Release</th><th>Status</th><th>When</th><th></th></tr></thead><tbody>` +
-    (rows.length ? rows.map(r => `<tr>
-      <td data-l="Code"><b>${esc(r.code)}</b></td>
+    (rows.length ? rows.map(r => `<tr class="${r.archived_at ? "arch" : ""}">
+      <td data-l="Code"><b>${esc(r.code)}</b>${r.archived_at
+        ? ' <span class="pill p-archived-row">archived</span>' : ""}</td>
       <td data-l="Customer"><span style="text-align:right">${esc(r.first_name)} ${esc(r.last_name)}<br>
         <span class="hint">${esc(r.email)}<br>${esc(r.phone)}</span></span></td>
       <td data-l="Size"><b>${esc(r.size)}</b></td>
@@ -1359,9 +1372,14 @@ function paintReservations() {
       <td class="actions"><select data-st="${r.id}" style="padding:6px 8px;font-size:12px">
         ${["confirmed","picked_up","no_show","cancelled"].map(s =>
           `<option value="${s}"${s===r.status?" selected":""}>${s.replace("_"," ")}</option>`).join("")}
-      </select></td></tr>`).join("")
+      </select>
+      ${canManage() ? (r.archived_at
+        ? `<button class="btn ghost sm" data-unarch="${r.id}">Restore</button>`
+        : `<button class="btn ghost sm" data-arch="${r.id}" data-status="${r.status}">Archive</button>`) : ""}
+      </td></tr>`).join("")
       : `<tr><td colspan="8" data-l="" class="empty">Nothing here yet.</td></tr>`) + `</tbody>`;
 
+  wireArchiveButtons();
   $("resTable").querySelectorAll("[data-st]").forEach(sel => sel.onchange = async () => {
     const patch = { status: sel.value };
     if (sel.value === "picked_up") patch.picked_up_at = new Date().toISOString();
@@ -1381,6 +1399,56 @@ function paintReservations() {
     loadReservations();
   });
 }
+
+async function runArchive(body, label) {
+  const m = $("archmsg");
+  m.classList.remove("show");
+  try {
+    const r = await rpc("archive_reservations", body);
+    m.className = "msg " + (r.ok ? "ok" : "err") + " show";
+    m.textContent = r.message || r.error || label;
+    await loadReservations();
+    await loadReleases();
+  } catch (e) {
+    m.className = "msg err show"; m.textContent = "Could not archive: " + e.message;
+  }
+}
+
+// per-row archive / restore
+function wireArchiveButtons() {
+  $("resTable").querySelectorAll("[data-arch]").forEach(b => b.onclick = () => {
+    const live = b.dataset.status === "confirmed";
+    const free = live
+      ? confirm("This reservation is still holding a pair.\n\n" +
+                "OK  — cancel it and put the pair back on sale (use this for test bookings)\n" +
+                "Cancel — just hide it and leave the pair held")
+      : false;
+    runArchive({ p_ids: [b.dataset.arch], p_release_stock: free });
+  });
+  $("resTable").querySelectorAll("[data-unarch]").forEach(b => b.onclick = () =>
+    runArchive({ p_ids: [b.dataset.unarch], p_unarchive: true }));
+}
+
+$("archBulk").onclick = () => {
+  const shown = state.reservations.filter(r => !r.archived_at);
+  if (!shown.length) return;
+  const relName = $("fRel").value
+    ? (state.releases.find(r => r.id === $("fRel").value) || {}).name
+    : null;
+  const live = shown.filter(r => r.status === "confirmed").length;
+  let msg = `Archive ${shown.length} reservation${shown.length === 1 ? "" : "s"}` +
+            (relName ? ` for ${relName}` : " matching the current filters") + "?";
+  if (live) {
+    msg += `\n\n${live} of them ${live === 1 ? "is" : "are"} still holding a pair.\n\n` +
+           "OK — cancel those and put the pairs back on sale (use this for test bookings)\n" +
+           "Cancel — stop, and pick a narrower filter first";
+    if (!confirm(msg)) return;
+    runArchive({ p_ids: shown.map(r => r.id), p_release_stock: true });
+  } else {
+    if (!confirm(msg)) return;
+    runArchive({ p_ids: shown.map(r => r.id), p_release_stock: false });
+  }
+};
 
 $("csv").onclick = () => {
   const relName = id => (state.releases.find(r => r.id === id) || {}).name || "";

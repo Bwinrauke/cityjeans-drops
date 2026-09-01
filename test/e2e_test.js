@@ -11,8 +11,25 @@ const { chromium, devices } = require('playwright');
   const shoe = fs.readFileSync('/tmp/shoe.jpg');
   // The sandbox can't reach cdn.shopify.com from the browser; serve the real
   // image bytes locally so the layout is exercised exactly as in production.
-  const block = async (pg) => pg.route('**/cdn.shopify.com/**', r =>
-    r.fulfill({ status: 200, contentType: 'image/jpeg', body: shoe }));
+  const block = async (pg) => {
+    // The sandbox browser can't reach cdn.shopify.com; serve real image bytes.
+    await pg.route('**/cdn.shopify.com/**', r =>
+      r.fulfill({ status: 200, contentType: 'image/jpeg', body: shoe }));
+    // Photos uploaded through the admin live on Supabase storage, which the
+    // browser also can't reach directly — send those via the local harness.
+    await pg.route(u => u.hostname.endsWith('supabase.co') && u.pathname.startsWith('/storage'),
+      async r => {
+      // Same-protocol rule blocks a rewrite, so fetch the bytes here and serve them.
+      try {
+        const via = r.request().url().replace(/^https:\/\/[^/]+/, 'http://localhost:8900');
+        const res = await fetch(via);
+        const buf = Buffer.from(await res.arrayBuffer());
+        await r.fulfill({ status: res.status,
+          contentType: res.headers.get('content-type') || 'application/octet-stream',
+          body: buf });
+      } catch { await r.abort(); }
+      });
+  };
   const page = await ctx.newPage();
   await block(page);
   const errors = [];
@@ -24,28 +41,61 @@ const { chromium, devices } = require('playwright');
     catch (e) { console.log('  FAIL  ' + label + ' -> ' + e.message); process.exitCode = 1; }
   };
 
+  // The catalogue is live data, so pick a release at run time rather than
+  // pinning the suite to a slug that can be archived at any moment.
+  const API = 'http://localhost:8900';
+  const KEY = 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a';
+  const call = async (fn, body = {}) => (await (await fetch(`${API}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) })).json());
+
+  const openRels = await call('list_open_releases');
+  if (!Array.isArray(openRels) || !openRels.length) {
+    console.log('  no open releases — cannot run the customer flow'); await browser.close(); return;
+  }
+  let TEST = null;
+  for (const r of openRels) {
+    const av = await call('get_availability', { p_release_slug: r.slug });
+    const free = (av || []).filter(a => a.available);
+    if (free.length) {
+      TEST = { ...r, sizes: [...new Set(free.map(a => a.size))], free };
+      break;
+    }
+  }
+  if (!TEST) { console.log('  no release has stock — cannot run the customer flow'); await browser.close(); return; }
+  console.log(`  (testing against "${TEST.name}" — ${TEST.sizes.length} sizes with stock)`);
+
   console.log('\n--- CUSTOMER FLOW ---');
-  await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club', { waitUntil: 'domcontentloaded' });
+  await page.goto(`http://localhost:8900/index.html?release=${TEST.slug}`, { waitUntil: 'domcontentloaded' });
 
   await step('release loads with name + price', async () => {
     await page.waitForSelector('#s-size.active', { timeout: 10000 });
     const name = await page.textContent('#name');
-    const price = await page.textContent('#price');
-    if (!name.includes('Jordan')) throw new Error('name = ' + name);
-    if (!price.includes('$215')) throw new Error('price = ' + price);
+    if (name.trim() !== TEST.name.trim()) throw new Error('name = ' + name);
+    if (TEST.retail_price != null) {
+      const price = await page.textContent('#price');
+      if (!price.replace(/[^0-9]/g, '').startsWith(String(Math.floor(TEST.retail_price))))
+        throw new Error('price = ' + price);
+    }
   });
 
-  await step('shoe photo rendered', async () => {
-    const ok = await page.evaluate(() => {
+  await step('shoe photo rendered (or a placeholder when none is set)', async () => {
+    const got = await page.evaluate(() => {
       const i = document.querySelector('#hero img');
-      return !!i && i.naturalWidth > 100;
+      const ph = document.querySelector('#hero .ph');
+      return { img: !!i && i.naturalWidth > 100, placeholder: !!ph };
     });
-    if (!ok) throw new Error('hero image did not load');
+    if (TEST.photo_url) {
+      if (!got.img) throw new Error('the release has a photo but it did not load');
+    } else if (!got.placeholder) {
+      throw new Error('no photo and no placeholder shown');
+    }
   });
 
   await step('size grid shows availability without counts', async () => {
     const n = await page.locator('#sizes .size').count();
-    if (n !== 12) throw new Error('expected 12 sizes, got ' + n);
+    if (n < 1) throw new Error('no sizes rendered');
     const sub = await page.textContent('#sizeSub');
     if (!/sizing/i.test(sub)) throw new Error('sub = ' + sub);
     if (/\d/.test(sub)) throw new Error('the size subheading leaks a count: ' + sub);
@@ -60,10 +110,7 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('pick size 10 then continue', async () => {
-    await page.click('#sizes .size:has-text("10.5") >> nth=-1').catch(() => {});
-    await page.locator('#sizes .size', { hasText: /^10Available|^10 /}).first().click().catch(async () => {
-      await page.locator('#sizes .size').nth(6).click();
-    });
+    await page.locator('#sizes .size:not(.out)').first().click();
     await page.waitForSelector('#sizes .size.sel');
     if (await page.isDisabled('#cta')) throw new Error('CTA still disabled after size pick');
     await page.click('#cta');
@@ -148,7 +195,7 @@ const { chromium, devices } = require('playwright');
   await page.screenshot({ path: '/root/cityjeans-drops/shot-3-confirmation.png', fullPage: true });
 
   await step('a second reservation on the same phone is refused', async () => {
-    await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club', { waitUntil: 'domcontentloaded' });
+    await page.goto(`http://localhost:8900/index.html?release=${TEST.slug}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#s-size.active');
     await page.locator('#sizes .size:not(.out)').nth(2).click();
     await page.click('#cta'); await page.waitForSelector('#s-loc.active');
@@ -164,7 +211,7 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('lookup finds the reservation again', async () => {
-    await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club', { waitUntil: 'domcontentloaded' });
+    await page.goto(`http://localhost:8900/index.html?release=${TEST.slug}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#s-size.active');
     await page.click('#cta2');
     await page.waitForSelector('#s-lookup.active');
@@ -177,7 +224,7 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('lookup rejects a wrong email', async () => {
-    await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club', { waitUntil: 'domcontentloaded' });
+    await page.goto(`http://localhost:8900/index.html?release=${TEST.slug}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#s-size.active');
     await page.click('#cta2');
     await page.fill('#lcode', code);
@@ -222,12 +269,12 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('a direct release link still skips the list', async () => {
-    await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club',
+    await page.goto('http://localhost:8900/index.html?release=' + TEST.slug + '',
       { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#s-size.active', { timeout: 15000 });
     if (await page.isVisible('#s-list')) throw new Error('the list showed for a direct link');
     const name = await page.textContent('#name');
-    if (!/Flight Club/.test(name)) throw new Error('wrong release: ' + name);
+    if (name.trim() !== TEST.name.trim()) throw new Error('wrong release: ' + name);
   });
 
   await step('lookup is reachable from the list', async () => {
@@ -280,13 +327,14 @@ const { chromium, devices } = require('playwright');
   await step('release editor loads the quantity editor', async () => {
     await page2.click('.tab[data-v="v-rel"]');
     await page2.waitForSelector('#relTable [data-edit]');
-    await page2.locator('#relTable tbody tr', { hasText: 'Flight Club' }).locator('[data-edit]').click();
+    await page2.locator('#relTable tbody tr', { hasText: TEST.name }).locator('[data-edit]').click();
     await page2.waitForSelector('#v-edit.on');
     await page2.waitForSelector('#qtyStores details', { timeout: 15000 });
     const stores = await page2.locator('#qtyStores details').count();
     if (stores < 2) throw new Error('only ' + stores + ' stores in the stack');
     const n = await page2.locator('#qtyStores details').first().locator('input').count();
-    if (n < 12) throw new Error('only ' + n + ' size rows in the first store');
+    if (n !== TEST.sizes.length)
+      throw new Error(`${n} size rows for a release with ${TEST.sizes.length} sizes`);
     const tot = await page2.textContent('#matrixTotal');
     if (!/pair/.test(tot)) throw new Error('grand total = ' + tot);
   });
@@ -422,20 +470,24 @@ const { chromium, devices } = require('playwright');
   await step('size run is checkboxes, and reserved sizes are locked', async () => {
     await page2.click('.tab[data-v="v-rel"]');
     await page2.waitForSelector('#relTable [data-edit]');
-    await page2.locator('#relTable tbody tr', { hasText: 'Flight Club' }).locator('[data-edit]').click();
+    await page2.locator('#relTable tbody tr', { hasText: TEST.name }).locator('[data-edit]').click();
     await page2.waitForSelector('#sizeChips .chip');
     if (await page2.locator('#fSizes').count()) throw new Error('the free-text size box is still there');
     await page2.waitForSelector('#qtyStores .qtyrow', { timeout: 15000 });
     const chips = await page2.locator('#sizeChips .chip').count();
-    if (chips < 12) throw new Error('only ' + chips + ' size chips');
+    if (chips < TEST.sizes.length)
+      throw new Error(`${chips} size chips for a release with ${TEST.sizes.length} sizes`);
     const rowsIn = () => page2.locator('#qtyStores details').first().locator('.qtyrow').count();
     const before = await rowsIn();
-    await page2.locator('#sizeChips .chip:not(.locked)').first().click();
-    await page2.waitForTimeout(300);
+    const ticked = page2.locator('#sizeChips .chip.on:not(.locked)').first();
+    if (!(await ticked.count())) throw new Error('no unlocked ticked size to test with');
+    const label = (await ticked.textContent()).trim();
+    await ticked.click();
+    await page2.waitForTimeout(350);
     const after = await rowsIn();
-    if (after >= before) throw new Error('unticking a size did not remove its row');
-    await page2.locator('#sizeChips .chip:not(.locked)').first().click();
-    await page2.waitForTimeout(300);
+    if (after >= before) throw new Error(`unticking ${label} did not remove its row (${before} -> ${after})`);
+    await page2.locator('#sizeChips .chip', { hasText: label }).first().click();
+    await page2.waitForTimeout(350);
   });
 
   await step('switching scale offers the matching size run', async () => {
@@ -540,6 +592,80 @@ const { chromium, devices } = require('playwright');
     if (r.status < 400) throw new Error('signup succeeded! status ' + r.status + ' ' + r.body);
   });
 
+  console.log('\n--- ARCHIVING ---');
+  await step('archiving hides a row, restoring brings it back', async () => {
+    await page2.click('.tab[data-v="v-res"]');
+    await page2.waitForSelector('#resTable tbody tr');
+    await page2.uncheck('#showArch').catch(() => {});
+    await page2.fill('#fQ', '');
+    await page2.waitForTimeout(500);
+
+    const before = await page2.locator('#resTable tbody tr').count();
+    const target = page2.locator('#resTable tbody tr').first();
+    const codeCell = (await target.locator('td').first().textContent()).trim().split(' ')[0];
+
+    // a confirmed row prompts about the held pair; decline so stock is untouched
+    page2.once('dialog', d => d.dismiss());
+    await target.locator('[data-arch]').click();
+    await page2.waitForSelector('#archmsg.show', { timeout: 15000 });
+    const msg = await page2.textContent('#archmsg');
+    if (!/archived/i.test(msg)) throw new Error('archive said: ' + msg);
+
+    await page2.waitForTimeout(600);
+    const after = await page2.locator('#resTable tbody tr').count();
+    if (after !== before - 1) throw new Error(`list went ${before} -> ${after}`);
+    const stillThere = await page2.textContent('#resTable');
+    if (stillThere.includes(codeCell)) throw new Error(codeCell + ' is still listed');
+
+    // it reappears with the box ticked, flagged as archived
+    await page2.check('#showArch');
+    await page2.waitForTimeout(900);
+    const withArch = await page2.textContent('#resTable');
+    if (!withArch.includes(codeCell)) throw new Error('archived row not shown when asked for');
+    const row = page2.locator('#resTable tbody tr', { hasText: codeCell }).first();
+    if (!(await row.getAttribute('class') || '').includes('arch'))
+      throw new Error('archived row is not marked');
+
+    // restore it
+    await row.locator('[data-unarch]').click();
+    await page2.waitForSelector('#archmsg.show', { timeout: 15000 });
+    if (!/brought back/i.test(await page2.textContent('#archmsg')))
+      throw new Error('restore said: ' + await page2.textContent('#archmsg'));
+    await page2.uncheck('#showArch');
+    await page2.waitForTimeout(900);
+    if (!(await page2.textContent('#resTable')).includes(codeCell))
+      throw new Error('restored row did not come back to the default list');
+  });
+
+  await step('archiving a test booking can hand the pair back', async () => {
+    // make a throwaway reservation, then archive it releasing the stock
+    const em = 'e2e-arch' + Date.now() + '@example.com';
+    const ph = '917' + String(Date.now()).slice(-7);
+    const made = await page2.evaluate(async ([url, key, em, ph, slug, loc, size]) => {
+      const r = await fetch(url + '/rest/v1/rpc/reserve_spot', {
+        method: 'POST',
+        headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_release_slug: slug,
+          p_location_id: loc, p_size: size, p_first_name: 'Arch', p_last_name: 'Test',
+          p_email: em, p_phone: ph })
+      });
+      return r.json();
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', em, ph,
+        TEST.slug, TEST.free[0].location_id, TEST.free[0].size]);
+    if (!made.ok) return;   // no stock left; the row-level path above already covers it
+
+    await page2.click('#refreshRes'); await page2.waitForTimeout(900);
+    await page2.fill('#fQ', made.code); await page2.waitForTimeout(500);
+    const row = page2.locator('#resTable tbody tr').first();
+    page2.once('dialog', d => d.accept());        // yes, put the pair back
+    await row.locator('[data-arch]').click();
+    await page2.waitForSelector('#archmsg.show', { timeout: 15000 });
+    const m2 = await page2.textContent('#archmsg');
+    if (!/released back to stock/i.test(m2))
+      throw new Error('expected the pair to be released: ' + m2);
+    await page2.fill('#fQ', '');
+  });
+
   console.log('\n--- MOBILE ADMIN (iPhone 13) ---');
   const mctx = await browser.newContext({ ...devices['iPhone 13'] });
   const m = await mctx.newPage();
@@ -591,7 +717,7 @@ const { chromium, devices } = require('playwright');
   await step('inventory editor fits a phone', async () => {
     await m.click('.tab[data-v="v-rel"]');
     await m.waitForSelector('#relTable [data-edit]', { timeout: 15000 });
-    await m.locator('#relTable tbody tr', { hasText: 'Flight Club' }).locator('[data-edit]').click();
+    await m.locator('#relTable tbody tr', { hasText: TEST.name }).locator('[data-edit]').click();
     await m.waitForSelector('#v-edit.on');
     await m.waitForSelector('#qtyStores details', { timeout: 10000 });
     await noOverflow('release editor');
@@ -674,14 +800,14 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('customers cannot see how many pairs are left', async () => {
-    const r = await page.evaluate(async ([url, key]) => {
+    const r = await page.evaluate(async ([url, key, slug]) => {
       const H = { apikey: key, Authorization: 'Bearer ' + key };
       const rows = await (await fetch(url + '/rest/v1/release_inventory?select=*', { headers: H })).json();
       const avail = await (await fetch(url + '/rest/v1/rpc/get_availability', {
         method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_release_slug: 'aj4-retro-og-flight-club' }) })).json();
+        body: JSON.stringify({ p_release_slug: slug }) })).json();
       return { rows, avail };
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a']);
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', TEST.slug]);
     if (Array.isArray(r.rows) && r.rows.length)
       throw new Error('anonymous can still read raw inventory rows');
     if (!Array.isArray(r.avail) || !r.avail.length)
