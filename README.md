@@ -120,14 +120,38 @@ invite/revoke cycle, and the fact that an uninvited email cannot sign up.
 
 ---
 
+## Notifications
+
+`public.notifications` is an outbox. `reserve_spot` writes a confirmation row
+per reservation; `enqueue_due_notifications()` adds a pickup reminder (4 hours
+before the window opens) and a last-call notice (2 hours before it closes).
+The `send-notifications` edge function claims a batch, renders subject and body
+from the reservation with `render_notification()`, sends, and marks each row
+sent or failed — retrying up to five times. Rows whose reservation has been
+cancelled, marked no-show or archived are retired rather than sent.
+
+Email goes through Resend. Everything about timing and wording lives in SQL, so
+changing provider only touches the edge function. See
+`supabase/functions/send-notifications/README.md` for the secrets and the cron
+schedule.
+
+Neither Shopify nor Gorgias can do this job: Shopify has no Admin API for
+arbitrary transactional email (its email is tied to its own order events, and
+Shopify Email is bulk marketing), and sending through Gorgias would open a
+support ticket per confirmation — wrecking response-time metrics and billing
+per ticket.
+
+---
+
 ## Not built yet
 
 - **Raffle mode.** `raffle_entries`, the `entry_status` enum and the per-release
   `fcfs`/`raffle` toggle are in place. What remains is the entry form and the
   draw — pick winners at random up to the quantity loaded per size per store,
   convert winners into reservations, mark the rest lost.
-- **Email and SMS.** Every reservation already queues two rows in
-  `notifications` with the code and release name. Wiring a provider means one
-  scheduled function that drains that queue.
+- **SMS.** The queue, templates and Twilio adapter are built. US carriers
+  require A2P 10DLC registration before a single text sends — Twilio's docs put
+  campaign review at 10–15 days — so texts stay queued until that clears and the
+  Twilio secrets are set.
 - **Shopify inventory.** Deliberately separate, so a reservation can't disturb
   live sell-through.
