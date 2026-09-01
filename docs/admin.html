@@ -129,7 +129,10 @@
   <div class="f"><label for="e">Email</label><input id="e" type="email" autocomplete="username"></div>
   <div class="f"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password"></div>
   <button class="btn" id="signin" style="width:100%">Sign in</button>
-  <div class="msg err" id="lmsg"></div>
+  <button class="btn ghost" id="setup" style="width:100%;margin-top:9px">First time? Set up my account</button>
+  <div class="msg" id="lmsg"></div>
+  <p class="hint" id="setupHint" style="text-align:center;margin-top:14px;display:none">
+    Use the email your manager invited. Anything else is turned away.</p>
 </div>
 
 <!-- ── APP ─────────────────────────────────────────────── -->
@@ -147,6 +150,7 @@
     <button class="tab" data-v="v-rel">Releases</button>
     <button class="tab" data-v="v-edit">New / Edit release</button>
     <button class="tab" data-v="v-loc">Stores</button>
+    <button class="tab" data-v="v-acct">Account</button>
   </nav>
 </header>
 
@@ -287,6 +291,40 @@
     <div class="card scroll" style="margin-top:12px"><table id="locTable"></table></div>
   </section>
 
+  <!-- ACCOUNT -->
+  <section class="view" id="v-acct">
+    <h2>Account</h2>
+    <p class="sub">Your password, and who else can get in.</p>
+
+    <div class="card" style="max-width:460px">
+      <h3 style="margin-top:0">Change your password</h3>
+      <div class="f"><label>New password</label>
+        <input id="pw1" type="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
+      <div class="f"><label>Confirm it</label>
+        <input id="pw2" type="password" autocomplete="new-password"></div>
+      <button class="btn sm" id="savePw">Update password</button>
+      <div class="msg" id="pwmsg"></div>
+    </div>
+
+    <h3>Staff</h3>
+    <p class="sub" style="margin-top:-6px">Sign-ups are closed. Only an email you invite here
+      can create an account — they set their own password at the login screen.</p>
+    <div class="card">
+      <div class="grid g3">
+        <div class="f"><label>Email *</label><input id="invEmail" placeholder="name@cityjeans.com"></div>
+        <div class="f"><label>Role</label><select id="invRole">
+          <option value="staff">Staff — register &amp; reservations</option>
+          <option value="manager">Manager — everything</option>
+          <option value="owner">Owner — everything, can manage staff</option>
+        </select></div>
+        <div class="f"><label>Note</label><input id="invNote" placeholder="Fordham Rd, cashier"></div>
+      </div>
+      <button class="btn sm" id="invite">Send invite</button>
+      <div class="msg" id="invmsg"></div>
+    </div>
+    <div class="card scroll" style="margin-top:12px"><table id="staffTable"></table></div>
+  </section>
+
 </div>
 </div>
 
@@ -358,6 +396,38 @@ $("signin").onclick = async () => {
 $("p").addEventListener("keydown", e => { if (e.key === "Enter") $("signin").click(); });
 $("signout").onclick = () => { clearSession(); location.reload(); };
 
+// First-time setup: only works for an email an admin has invited.
+$("setup").onclick = async () => {
+  const m = $("lmsg"), email = $("e").value.trim(), pass = $("p").value;
+  m.classList.remove("show");
+  if (!email || pass.length < 8) {
+    m.className = "msg err show";
+    m.textContent = "Enter your invited email and a password of at least 8 characters.";
+    $("setupHint").style.display = "block";
+    return;
+  }
+  $("setup").disabled = true; $("setup").textContent = "Setting up…";
+  try {
+    const r = await fetch(base + "/auth/v1/signup", {
+      method:"POST", headers:{ apikey: CFG.SUPABASE_KEY, "Content-Type":"application/json" },
+      body: JSON.stringify({ email, password: pass }) });
+    const j = await r.json();
+    if (!r.ok || j.code >= 400) {
+      m.className = "msg err show";
+      m.textContent = "That email hasn't been invited. Ask a manager to add it first.";
+      $("setupHint").style.display = "block";
+    } else if (j.access_token) {
+      setSession(j); await boot();
+    } else {
+      m.className = "msg ok show";
+      m.textContent = "Account created — sign in with that password now.";
+    }
+  } catch (err) {
+    m.className = "msg err show"; m.textContent = "Could not reach the server.";
+  }
+  $("setup").disabled = false; $("setup").textContent = "First time? Set up my account";
+};
+
 // ── tabs ──────────────────────────────────────────────────────
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => go(t.dataset.v));
 function go(v) {
@@ -365,8 +435,75 @@ function go(v) {
   document.querySelectorAll(".view").forEach(x => x.classList.toggle("on", x.id === v));
   window.scrollTo(0,0);
   if (v === "v-res") loadReservations();
+  if (v === "v-acct") loadStaff();
   if (v === "v-reg") setTimeout(() => $("rcode").focus(), 60);
 }
+
+// ── account: password ─────────────────────────────────────────
+$("savePw").onclick = async () => {
+  const m = $("pwmsg"), a = $("pw1").value, b = $("pw2").value;
+  m.classList.remove("show");
+  if (a.length < 8) { m.className = "msg err show";
+    m.textContent = "Use at least 8 characters."; return; }
+  if (a !== b) { m.className = "msg err show";
+    m.textContent = "The two passwords don't match."; return; }
+  $("savePw").disabled = true; $("savePw").textContent = "Saving…";
+  try {
+    await req("/auth/v1/user", { method:"PUT",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ password: a }) });
+    $("pw1").value = $("pw2").value = "";
+    m.className = "msg ok show";
+    m.textContent = "Password updated. It takes effect the next time you sign in.";
+  } catch (e) {
+    m.className = "msg err show";
+    m.textContent = /weak|pwned|short/i.test(e.message)
+      ? "That password is too weak or has appeared in a breach. Try another."
+      : "Could not update: " + e.message;
+  }
+  $("savePw").disabled = false; $("savePw").textContent = "Update password";
+};
+
+// ── account: staff ────────────────────────────────────────────
+async function loadStaff() {
+  let r;
+  try { r = await rpc("list_staff", {}); } catch { return; }
+  const rows = (r && r.ok && r.staff) || [];
+  $("staffTable").innerHTML = `<thead><tr><th>Email</th><th>Role</th><th>Note</th>
+      <th>Account</th><th></th></tr></thead><tbody>` +
+    (rows.length ? rows.map(s => `<tr>
+      <td><b>${esc(s.email)}</b></td>
+      <td>${esc(s.role)}</td>
+      <td class="hint">${esc(s.note || "—")}</td>
+      <td>${s.has_account ? '<span class="pill p-open">Set up</span>'
+                          : '<span class="pill p-draft">Invited</span>'}</td>
+      <td><button class="btn danger sm" data-rev="${esc(s.email)}">Revoke</button></td>
+    </tr>`).join("") : `<tr><td colspan="5" class="empty">Nobody invited yet.</td></tr>`) + `</tbody>`;
+  $("staffTable").querySelectorAll("[data-rev]").forEach(b => b.onclick = async () => {
+    const m = $("invmsg");
+    const res = await rpc("revoke_user", { p_email: b.dataset.rev });
+    m.className = "msg " + (res.ok ? "ok" : "err") + " show";
+    m.textContent = res.message || res.error;
+    loadStaff();
+  });
+}
+
+$("invite").onclick = async () => {
+  const m = $("invmsg");
+  m.classList.remove("show");
+  $("invite").disabled = true;
+  try {
+    const r = await rpc("invite_user", {
+      p_email: $("invEmail").value, p_role: $("invRole").value,
+      p_note: $("invNote").value.trim() || null });
+    m.className = "msg " + (r.ok ? "ok" : "err") + " show";
+    m.textContent = r.ok
+      ? r.message + " Send them the admin link — they choose \"First time? Set up my account\"."
+      : (r.message || "Could not invite.");
+    if (r.ok) { $("invEmail").value = $("invNote").value = ""; loadStaff(); }
+  } catch (e) { m.className = "msg err show"; m.textContent = "Could not invite: " + e.message; }
+  $("invite").disabled = false;
+};
 
 // ── register / redeem ─────────────────────────────────────────
 $("rcode").addEventListener("input", e => e.target.value = e.target.value.toUpperCase().trim());
