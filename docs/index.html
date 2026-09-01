@@ -42,7 +42,9 @@
   .dot{width:6px; height:6px; border-radius:50%; background:var(--line)}
   .dot.on{background:var(--accent)}
 
-  main{flex:1; padding:0 var(--pad) 120px}
+  /* --bar-h is measured from the real sticky bar at runtime, so the last row
+     of sizes is never hidden behind it on a short phone. */
+  main{flex:1; padding:0 var(--pad); padding-bottom:var(--bar-h,190px)}
   .screen{display:none; animation:in .22s ease}
   .screen.active{display:block}
   @keyframes in{from{opacity:0; transform:translateY(6px)}to{opacity:1; transform:none}}
@@ -336,6 +338,18 @@
     paintBar(id);
   }
 
+  // Keep the page's bottom padding equal to the sticky bar's real height, so
+  // the last row of sizes always clears it — on any phone, with one button or
+  // two, and after the on-screen keyboard opens and closes.
+  function fitBar() {
+    const bar = $("bar");
+    const h = bar.style.display === "none" ? 24 : bar.getBoundingClientRect().height + 16;
+    document.documentElement.style.setProperty("--bar-h", Math.ceil(h) + "px");
+  }
+  window.addEventListener("resize", fitBar);
+  window.addEventListener("orientationchange", () => setTimeout(fitBar, 250));
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", fitBar);
+
   function paintBar(id) {
     const bar = $("bar"), cta = $("cta"), cta2 = $("cta2");
     cta2.style.display = "none";
@@ -352,6 +366,7 @@
     } else bar.style.display = "none";
     // The confirmation screen gets no floating button — it would sit on top of
     // the ticket in the screenshot the customer shows the cashier.
+    requestAnimationFrame(fitBar);
   }
 
   $("back").onclick = () => {
@@ -401,11 +416,23 @@
     paintSizes();
   }
 
+  const SCALE_TAG = { mens:"US", womens:"US W", gs:"GS", ps:"PS", td:"TD", unisex:"US" };
+  const SCALES = {
+    mens:   "US Men's sizing",
+    womens: "US Women's sizing",
+    gs:     "Grade School (GS) sizing",
+    ps:     "Preschool (PS) sizing",
+    td:     "Toddler (TD) sizing",
+    unisex: "US sizing"
+  };
+
   function paintSizes() {
     const list = sizeList();
     const total = list.reduce((a,s) => a + s.n, 0);
-    $("sizeSub").textContent = total ? `${total} pair${total===1?"":"s"} left across all stores`
-                                     : "Everything is currently reserved";
+    const scale = SCALES[S.release.size_scale] || SCALES.mens;
+    $("sizeSub").textContent = scale + " · " +
+      (total ? `${total} pair${total===1?"":"s"} left across all stores`
+             : "everything is currently reserved");
     $("sizes").innerHTML = list.map(s => {
       const out = s.n === 0, low = s.n > 0 && s.n <= 3;
       return `<button class="size${out ? " out" : ""}${low ? " low" : ""}${S.size===s.size?" sel":""}"
@@ -419,7 +446,8 @@
 
   function paintLocs() {
     const list = locsFor(S.size);
-    $("locSub").textContent = `Size ${S.size} · ${list.length} store${list.length===1?"":"s"} with stock`;
+    const tag = SCALE_TAG[S.release.size_scale] || "US";
+    $("locSub").textContent = `${tag} ${S.size} · ${list.length} store${list.length===1?"":"s"} with stock`;
     $("locs").innerHTML = list.map(l => `
       <button class="loc${S.loc===l.id?" sel":""}" data-id="${l.id}">
         <div><div class="nm">${esc(l.name)}</div>
@@ -436,7 +464,7 @@
     $("recap").innerHTML = `
       ${r.photo_url ? `<img src="${esc(r.photo_url)}" alt="">` : `<img alt="">`}
       <div><div class="t">${esc(r.name)}</div>
-      <div class="s">Size ${esc(S.size)} · ${esc(l ? l.name : "")}</div></div>`;
+      <div class="s">${esc(SCALE_TAG[r.size_scale] || "US")} ${esc(S.size)} · ${esc(l ? l.name : "")}</div></div>`;
   }
 
   function paintTicket(res) {
@@ -452,7 +480,7 @@
       ${badge}
       <div class="tdiv"></div>
       <div class="tshoe">${esc(res.release)}</div>
-      <div class="trow"><span class="k">Size</span><span class="v">US ${esc(res.size)}</span></div>
+      <div class="trow"><span class="k">Size</span><span class="v">${esc(SCALE_TAG[res.size_scale] || "US")} ${esc(res.size)}</span></div>
       <div class="trow"><span class="k">Pick up at</span><span class="v">${esc(res.location)}</span></div>
       <div class="trow"><span class="k">Name</span><span class="v">${esc(res.first_name)} ${esc(res.last_name)}</span></div>
       ${res.retail_price != null ? `<div class="trow"><span class="k">Price</span><span class="v">${money(res.retail_price)}</span></div>` : ""}
