@@ -130,10 +130,23 @@ from the reservation with `render_notification()`, sends, and marks each row
 sent or failed — retrying up to five times. Rows whose reservation has been
 cancelled, marked no-show or archived are retired rather than sent.
 
-Email goes through Amazon SES ($0.10/1,000, no monthly fee, no daily cap; a free Resend tier caps at 100/day, which would trickle one drop's confirmations out over three days). Resend is kept as a fallback. Everything about timing and wording lives in SQL, so
-changing provider only touches the edge function. See
-`supabase/functions/send-notifications/README.md` for the secrets and the cron
-schedule.
+**Live.** Email goes through Amazon SES in `us-east-2`, from
+`drops@cityjeans.com`, drained by a pg_cron job every minute. The domain signs
+with DKIM and uses a custom MAIL FROM on `shop.cityjeans.com`, so both
+alignment paths pass the domain's `p=quarantine` DMARC policy — verified by a
+test send landing in the inbox.
+
+SES costs $0.10 per 1,000 with no monthly fee; the account allows 50,000/day at
+14/second, so a drop costs a few cents. A free Resend tier caps at 100/day,
+which would have trickled one drop's confirmations out over three days — Resend
+remains as a fallback selected by which secrets are present.
+
+A customer normally receives two emails: the confirmation, and a reminder four
+hours before pickup opens. A third, the last call, only reaches someone who
+still has an uncollected pair two hours before the window shuts. A unique index
+on (reservation, channel, template) makes a duplicate impossible however often
+the job runs. Timing and wording live in SQL, so changing either is a migration
+rather than a deploy. See `supabase/functions/send-notifications/README.md`.
 
 Neither Shopify nor Gorgias can do this job: Shopify has no Admin API for
 arbitrary transactional email (its email is tied to its own order events, and
