@@ -130,7 +130,7 @@ from the reservation with `render_notification()`, sends, and marks each row
 sent or failed — retrying up to five times. Rows whose reservation has been
 cancelled, marked no-show or archived are retired rather than sent.
 
-Email goes through Resend. Everything about timing and wording lives in SQL, so
+Email goes through Amazon SES ($0.10/1,000, no monthly fee, no daily cap; a free Resend tier caps at 100/day, which would trickle one drop's confirmations out over three days). Resend is kept as a fallback. Everything about timing and wording lives in SQL, so
 changing provider only touches the edge function. See
 `supabase/functions/send-notifications/README.md` for the secrets and the cron
 schedule.
