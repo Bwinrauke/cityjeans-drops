@@ -9,8 +9,8 @@ for loading drops and redeeming codes at the register.
 
 | | |
 |---|---|
-| Customer app | https://bwinrauke.github.io/cityjeans-drops/ |
-| Admin panel | https://bwinrauke.github.io/cityjeans-drops/admin.html |
+| Customer app | https://drops.cityjeans.com |
+| Admin panel | https://drops.cityjeans.com/admin.html |
 | Repo | https://github.com/Bwinrauke/cityjeans-drops |
 | Admin login | `ben@cityjeans.com` |
 | Supabase project | `cityjeans-drops` (`nrncccfqgwxcugqdouvs`) |

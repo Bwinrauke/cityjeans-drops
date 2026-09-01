@@ -549,15 +549,38 @@ const { chromium, devices } = require('playwright');
   });
 
   console.log('\n--- ROLES ---');
+  const cashier = 'e2e-staff-cashier' + Date.now() + '@cityjeans.com';
+  const cashierPass = 'cashier-probe-2026';
   await step('a staff cashier sees only the register, reservations and their password', async () => {
+    // make a real staff-role account for this check, then clear its first-login lock
+    await page2.click('.tab[data-v="v-acct"]');
+    await page2.waitForSelector('#invEmail');
+    await page2.fill('#invEmail', cashier);
+    await page2.fill('#invName', 'Cashier');
+    await page2.selectOption('#invRole', 'staff');
+    await page2.fill('#invPass', cashierPass);
+    await page2.click('#invite');
+    await page2.waitForSelector('#invmsg.show');
+    if (!/Account created/i.test(await page2.textContent('#invmsg')))
+      throw new Error('could not create the cashier: ' + await page2.textContent('#invmsg'));
+
     const c = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const sp = await c.newPage(); await block(sp);
     await sp.goto('http://localhost:8900/admin.html', { waitUntil: 'domcontentloaded' });
-    await sp.fill('#e', 'zz-cashier2@cityjeans.com');
-    await sp.fill('#p', 'cashier-probe-2026');
+    await sp.fill('#e', cashier); await sp.fill('#p', cashierPass);
     await sp.click('#signin');
     await sp.waitForSelector('#app', { state: 'visible', timeout: 20000 });
     await sp.waitForTimeout(700);
+
+    // first sign-in must land locked on Account until they set their own password
+    if (!(await sp.isDisabled('.tab[data-v="v-reg"]')))
+      throw new Error('a temp-password account was not locked to the Account tab');
+    await sp.fill('#pw1', 'cashier-own-pass-1');
+    await sp.fill('#pw2', 'cashier-own-pass-1');
+    await sp.click('#savePw');
+    await sp.waitForFunction(() => !document.querySelector('.tab[data-v="v-reg"]').disabled,
+      null, { timeout: 15000 });
+
     const tabs = await sp.$$eval('.tab', els =>
       els.filter(e => e.style.display !== 'none').map(e => e.textContent.trim()));
     const want = ['Register', 'Reservations', 'Account'];
@@ -572,10 +595,10 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('the database refuses staff writes even without the UI', async () => {
-    const r = await page2.evaluate(async ([url, key]) => {
+    const r = await page2.evaluate(async ([url, key, em, pw]) => {
       const tok = await (await fetch(url + '/auth/v1/token?grant_type=password', {
         method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'zz-cashier2@cityjeans.com', password: 'cashier-probe-2026' })
+        body: JSON.stringify({ email: em, password: pw })
       })).json();
       const H = { apikey: key, Authorization: 'Bearer ' + tok.access_token, 'Content-Type': 'application/json' };
       const call = async (fn, body) =>
@@ -585,9 +608,16 @@ const { chromium, devices } = require('playwright');
         create: await call('create_staff_account', { p_email: 'a@b.com', p_password: 'aaaaaaaaaaaa', p_role: 'owner' }),
         list:   await call('list_staff', {})
       };
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a']);
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', cashier, 'cashier-own-pass-1']);
     for (const [k, v] of Object.entries(r))
       if (v.ok) throw new Error('staff was allowed to ' + k + '!');
+
+    // tidy up the cashier
+    await page2.click('.tab[data-v="v-acct"]');
+    await page2.waitForSelector(`#staffTable [data-rev="${cashier}"]`, { timeout: 10000 });
+    await page2.click(`#staffTable [data-rev="${cashier}"]`);
+    await page2.waitForFunction(
+      e => !document.querySelector(`#staffTable [data-rev="${e}"]`), cashier, { timeout: 10000 });
   });
 
   await step('customers cannot see how many pairs are left', async () => {
