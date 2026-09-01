@@ -10,8 +10,8 @@ for loading drops and redeeming codes at the register.
 | | |
 |---|---|
 | Customer app | https://bwinrauke.github.io/cityjeans-drops/ |
-| Admin panel | same URL + `/admin.html` |
-| Backup host | `https://nrncccfqgwxcugqdouvs.supabase.co/functions/v1/app/` |
+| Admin panel | https://bwinrauke.github.io/cityjeans-drops/admin.html |
+| Repo | https://github.com/Bwinrauke/cityjeans-drops |
 | Admin login | `ben@cityjeans.com` |
 | Supabase project | `cityjeans-drops` (`nrncccfqgwxcugqdouvs`) |
 
