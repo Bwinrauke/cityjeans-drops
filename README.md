@@ -38,6 +38,7 @@ while they decide. A lookup flow (code + email) recovers a lost screenshot.
 - **New / Edit release** — photo upload, details, timing, and a store × size
   grid for quantities.
 - **Stores** — add or hide pickup locations.
+- **Account** — change your own password; invite, list and revoke staff.
 
 ---
 
@@ -61,8 +62,11 @@ because that person already reserved, the claimed unit is handed straight back.
 - `reservations` is invisible to anonymous callers. Reserving goes through
   `reserve_spot`; retrieval through `lookup_reservation`, which needs the code
   **and** the matching email.
-- Admin actions require an account listed in `public.admins`. A stranger who
-  signs up gets an account that can see nothing.
+- **Accounts are invite-only.** A trigger on `auth.users` rejects any signup
+  whose email is not in `public.invited_emails`, so the public signup endpoint
+  is closed regardless of the dashboard setting. An invite carries a role, and
+  creating the account provisions it into `public.admins` automatically.
+- Admin actions require an account listed in `public.admins`.
 - Verified: anonymous attempts to read reservations, read the admin list, insert
   a reservation directly, raise inventory, read draft releases, or redeem a code
   all fail.
@@ -104,7 +108,8 @@ node test/e2e_test.js
 ```
 
 Exercises both apps end to end against the real backend: reservation, duplicate
-rejection, lookup, admin login, inventory grid, and double-redemption.
+rejection, lookup, admin login, inventory grid, double-redemption, the staff
+invite/revoke cycle, and the fact that an uninvited email cannot sign up.
 
 ---
 

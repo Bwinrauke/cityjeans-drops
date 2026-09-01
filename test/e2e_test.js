@@ -50,7 +50,7 @@ const { chromium, devices } = require('playwright');
     if (!/pairs left/.test(sub)) throw new Error('sub = ' + sub);
   });
 
-  await page.screenshot({ path: 'shot-1-product.png', fullPage: true });
+  await page.screenshot({ path: '/root/cityjeans-drops/shot-1-product.png', fullPage: true });
 
   await step('continue is disabled until a size is picked', async () => {
     if (!(await page.isDisabled('#cta'))) throw new Error('CTA was enabled with no size');
@@ -74,7 +74,7 @@ const { chromium, devices } = require('playwright');
     if (!/store/.test(t)) throw new Error('locSub = ' + t);
   });
 
-  await page.screenshot({ path: 'shot-2-location.png', fullPage: true });
+  await page.screenshot({ path: '/root/cityjeans-drops/shot-2-location.png', fullPage: true });
 
   await step('pick a store and continue', async () => {
     await page.locator('#locs .loc').first().click();
@@ -140,7 +140,7 @@ const { chromium, devices } = require('playwright');
     // meta lives on the product screen; check it from a fresh load below
   });
 
-  await page.screenshot({ path: 'shot-3-confirmation.png', fullPage: true });
+  await page.screenshot({ path: '/root/cityjeans-drops/shot-3-confirmation.png', fullPage: true });
 
   await step('a second reservation on the same phone is refused', async () => {
     await page.goto('http://localhost:8900/index.html?release=aj4-retro-og-flight-club', { waitUntil: 'domcontentloaded' });
@@ -217,7 +217,7 @@ const { chromium, devices } = require('playwright');
     if (!t.includes(code)) throw new Error('code not found in reservations table');
   });
 
-  await page2.screenshot({ path: 'shot-4-admin-reservations.png', fullPage: true });
+  await page2.screenshot({ path: '/root/cityjeans-drops/shot-4-admin-reservations.png', fullPage: true });
 
   await step('release editor loads inventory matrix', async () => {
     await page2.click('.tab[data-v="v-rel"]');
@@ -231,7 +231,7 @@ const { chromium, devices } = require('playwright');
     if (!/pairs loaded/.test(tot)) throw new Error('total = ' + tot);
   });
 
-  await page2.screenshot({ path: 'shot-5-admin-editor.png', fullPage: true });
+  await page2.screenshot({ path: '/root/cityjeans-drops/shot-5-admin-editor.png', fullPage: true });
 
   await step('register redeems the code once, then refuses a second time', async () => {
     await page2.click('.tab[data-v="v-reg"]');
@@ -247,7 +247,52 @@ const { chromium, devices } = require('playwright');
     if (!/Already picked up/i.test(t)) throw new Error('second redeem said: ' + t);
   });
 
-  await page2.screenshot({ path: 'shot-6-admin-register.png' });
+  await page2.screenshot({ path: '/root/cityjeans-drops/shot-6-admin-register.png' });
+
+  await step('account tab: password form and staff list load', async () => {
+    await page2.click('.tab[data-v="v-acct"]');
+    await page2.waitForSelector('#v-acct.on');
+    await page2.waitForSelector('#staffTable tbody tr', { timeout: 10000 });
+    const t = await page2.textContent('#staffTable');
+    if (!t.includes('ben@cityjeans.com')) throw new Error('owner missing from staff list');
+    if (!(await page2.isVisible('#pw1'))) throw new Error('password field missing');
+  });
+
+  await step('password change rejects a mismatch', async () => {
+    await page2.fill('#pw1', 'abcdefgh12'); await page2.fill('#pw2', 'different99');
+    await page2.click('#savePw');
+    await page2.waitForSelector('#pwmsg.show');
+    const t = await page2.textContent('#pwmsg');
+    if (!/don't match/i.test(t)) throw new Error('msg = ' + t);
+    await page2.fill('#pw1', ''); await page2.fill('#pw2', '');
+  });
+
+  const invitee = 'e2e-staff-' + Date.now() + '@cityjeans.com';
+  await step('invite a teammate, then revoke them', async () => {
+    await page2.fill('#invEmail', invitee);
+    await page2.selectOption('#invRole', 'staff');
+    await page2.fill('#invNote', 'e2e test row');
+    await page2.click('#invite');
+    await page2.waitForSelector('#invmsg.show');
+    let t = await page2.textContent('#invmsg');
+    if (!/can now set up an account/i.test(t)) throw new Error('invite said: ' + t);
+    await page2.waitForSelector(`#staffTable [data-rev="${invitee}"]`, { timeout: 10000 });
+    await page2.click(`#staffTable [data-rev="${invitee}"]`);
+    await page2.waitForFunction(
+      e => !document.querySelector(`#staffTable [data-rev="${e}"]`), invitee, { timeout: 10000 });
+  });
+
+  await step('an uninvited email cannot create an account', async () => {
+    const r = await page2.evaluate(async (cfg) => {
+      const res = await fetch(cfg.url + '/auth/v1/signup', {
+        method: 'POST',
+        headers: { apikey: cfg.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'nobody' + Date.now() + '@example.com', password: 'Whatever123!' })
+      });
+      return { status: res.status, body: (await res.text()).slice(0, 120) };
+    }, { url: 'http://localhost:8900', key: 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a' });
+    if (r.status < 400) throw new Error('signup succeeded! status ' + r.status + ' ' + r.body);
+  });
 
   await step('no console errors anywhere', async () => {
     const real = errors.filter(e => !/favicon|404|net::ERR_/i.test(e));
