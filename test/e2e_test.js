@@ -296,6 +296,71 @@ const { chromium, devices } = require('playwright');
       e => !document.querySelector(`#staffTable [data-rev="${e}"]`), invitee, { timeout: 10000 });
   });
 
+  await step('one temp password can cover several people, and forces a change', async () => {
+    await page2.click('.tab[data-v="v-acct"]');
+    await page2.waitForSelector('#invPass');
+    const shared = 'city-jeans-shared-2026';
+    const a = 'e2e-staff-a' + Date.now() + '@cityjeans.com';
+    const b = 'e2e-staff-b' + Date.now() + '@cityjeans.com';
+
+    await page2.fill('#invPass', shared);
+    await page2.fill('#invEmail', a);
+    await page2.selectOption('#invRole', 'staff');
+    await page2.click('#invite');
+    await page2.waitForSelector('#invmsg.show');
+    if (!/Account created/i.test(await page2.textContent('#invmsg')))
+      throw new Error('first account failed: ' + await page2.textContent('#invmsg'));
+
+    // the password box must still hold the shared password
+    if (await page2.inputValue('#invPass') !== shared)
+      throw new Error('the temp password was cleared between people');
+
+    await page2.fill('#invEmail', b);
+    await page2.click('#invite');
+    await page2.waitForSelector('#invmsg.show');
+    if (!/Account created/i.test(await page2.textContent('#invmsg')))
+      throw new Error('second account failed with the same password');
+
+    // both can sign in with the one password
+    for (const em of [a, b]) {
+      const ok = await page2.evaluate(async ([url, key, e, pw]) => {
+        const r = await fetch(url + '/auth/v1/token?grant_type=password', {
+          method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: e, password: pw }) });
+        return !!(await r.json()).access_token;
+      }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', em, shared]);
+      if (!ok) throw new Error(em + ' could not sign in with the shared password');
+    }
+
+    // and are locked to the Account tab until they set their own
+    const ctx3 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const p3 = await ctx3.newPage();
+    await block(p3);
+    await p3.goto('http://localhost:8900/admin.html', { waitUntil: 'domcontentloaded' });
+    await p3.fill('#e', a); await p3.fill('#p', shared);
+    await p3.click('#signin');
+    await p3.waitForSelector('#v-acct.on', { timeout: 20000 });
+    if (!(await p3.isDisabled('.tab[data-v="v-reg"]')))
+      throw new Error('other tabs are reachable before the password is changed');
+    const warn = await p3.textContent('#pwmsg');
+    if (!/temporary password/i.test(warn)) throw new Error('no warning shown: ' + warn);
+
+    await p3.fill('#pw1', 'my-own-password-9'); await p3.fill('#pw2', 'my-own-password-9');
+    await p3.click('#savePw');
+    await p3.waitForFunction(() => !document.querySelector('.tab[data-v="v-reg"]').disabled,
+      null, { timeout: 15000 });
+    await ctx3.close();
+
+    // tidy up
+    await page2.click('.tab[data-v="v-acct"]');
+    for (const em of [a, b]) {
+      await page2.waitForSelector(`#staffTable [data-rev="${em}"]`, { timeout: 10000 });
+      await page2.click(`#staffTable [data-rev="${em}"]`);
+      await page2.waitForFunction(
+        e => !document.querySelector(`#staffTable [data-rev="${e}"]`), em, { timeout: 10000 });
+    }
+  });
+
   await step('size run is checkboxes, and reserved sizes are locked', async () => {
     await page2.click('.tab[data-v="v-rel"]');
     await page2.waitForSelector('#relTable [data-edit]');

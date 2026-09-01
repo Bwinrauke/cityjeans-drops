@@ -31,6 +31,7 @@
   .tab{background:none; border:0; border-bottom:2px solid transparent; color:var(--muted);
     font:inherit; font-weight:600; font-size:14px; padding:9px 14px; cursor:pointer; white-space:nowrap}
   .tab.on{color:var(--text); border-bottom-color:var(--accent)}
+  .tab:disabled{opacity:.32; cursor:not-allowed}
 
   .view{display:none; padding-top:22px} .view.on{display:block}
   h2{font-size:20px; font-weight:800; margin:0 0 4px; letter-spacing:-.01em}
@@ -502,7 +503,9 @@
       </div>
       <div class="grid g2">
         <div class="f"><label>Temporary password</label>
-          <input id="invPass" placeholder="at least 10 characters"></div>
+          <input id="invPass" placeholder="at least 10 characters">
+          <p class="hint">Kept between people, so one password can cover the whole
+            team. Everyone is made to change it the first time they sign in.</p></div>
         <div class="f"><label>&nbsp;</label>
           <button class="btn ghost sm" id="genPass" style="width:100%">Generate one</button></div>
       </div>
@@ -598,7 +601,10 @@ $("p").addEventListener("keydown", e => { if (e.key === "Enter") $("signin").cli
 $("signout").onclick = () => { clearSession(); location.reload(); };
 
 // ── tabs ──────────────────────────────────────────────────────
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => go(t.dataset.v));
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  if (mustChange && t.dataset.v !== "v-acct") return;
+  go(t.dataset.v);
+});
 function go(v) {
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.v === v));
   document.querySelectorAll(".view").forEach(x => x.classList.toggle("on", x.id === v));
@@ -607,6 +613,25 @@ function go(v) {
   if (v === "v-res") loadReservations();
   if (v === "v-acct") loadStaff();
   if (v === "v-reg") setTimeout(() => $("rcode").focus(), 60);
+}
+
+// ── first sign-in: make them replace the temporary password ───
+let mustChange = false;
+function forcePasswordChange() {
+  mustChange = true;
+  go("v-acct");
+  document.querySelectorAll(".tab").forEach(t => {
+    if (t.dataset.v !== "v-acct") t.disabled = true;
+  });
+  const m = $("pwmsg");
+  m.className = "msg err show";
+  m.textContent = "You are signed in with a temporary password. Choose your own " +
+    "to carry on — the rest of the panel unlocks once you do.";
+  setTimeout(() => $("pw1").focus(), 120);
+}
+function releasePasswordLock() {
+  mustChange = false;
+  document.querySelectorAll(".tab").forEach(t => t.disabled = false);
 }
 
 // ── account: password ─────────────────────────────────────────
@@ -623,8 +648,14 @@ $("savePw").onclick = async () => {
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ password: a }) });
     $("pw1").value = $("pw2").value = "";
+    try { await rpc("clear_password_flag", {}); } catch {}
     m.className = "msg ok show";
-    m.textContent = "Password updated. It takes effect the next time you sign in.";
+    if (mustChange) {
+      releasePasswordLock();
+      m.textContent = "Password set. Everything is unlocked — you're good to go.";
+    } else {
+      m.textContent = "Password updated. It takes effect the next time you sign in.";
+    }
   } catch (e) {
     m.className = "msg err show";
     m.textContent = /weak|pwned|short/i.test(e.message)
@@ -695,7 +726,10 @@ $("invite").onclick = async () => {
         "Temporary password: <code>" + esc(pass) + "</code><br>" +
         "Send them the admin link and this password \u2014 they change it above once they are in. " +
         "<b>This is the only time it is shown.</b>";
-      $("invEmail").value = $("invName").value = $("invPass").value = "";
+      // The password is deliberately left in the box: creating several people
+      // with the same temporary password is the normal way to onboard a team.
+      $("invEmail").value = $("invName").value = "";
+      $("invEmail").focus();
       loadStaff();
     } else {
       m.textContent = r.message || "Could not create the account.";
@@ -1331,7 +1365,8 @@ async function boot() {
   $("loginLogo").textContent = $("appLogo").textContent = CFG.BRAND;
   if (!TOKEN) { $("login").style.display = "block"; $("app").style.display = "none"; return; }
   try {
-    const admin = await rpc("is_admin", {});
+    const who = await rpc("me", {});
+    const admin = who && who.ok;
     if (!admin) {
       clearSession();
       $("login").style.display = "block"; $("app").style.display = "none";
@@ -1342,6 +1377,7 @@ async function boot() {
     $("login").style.display = "none"; $("app").style.display = "block";
     $("whoami").textContent = EMAIL;
     await loadLocations(); await loadReleases();
+    if (who.must_change_password) { forcePasswordChange(); return; }
     go("v-reg");
   } catch (e) {
     clearSession();
