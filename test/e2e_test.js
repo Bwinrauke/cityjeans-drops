@@ -43,11 +43,14 @@ const { chromium, devices } = require('playwright');
     if (!ok) throw new Error('hero image did not load');
   });
 
-  await step('size grid populated with availability', async () => {
+  await step('size grid shows availability without counts', async () => {
     const n = await page.locator('#sizes .size').count();
     if (n !== 12) throw new Error('expected 12 sizes, got ' + n);
     const sub = await page.textContent('#sizeSub');
-    if (!/pairs left/.test(sub)) throw new Error('sub = ' + sub);
+    if (!/sizing/i.test(sub)) throw new Error('sub = ' + sub);
+    if (/\d/.test(sub)) throw new Error('the size subheading leaks a count: ' + sub);
+    const grid = await page.textContent('#sizes');
+    if (/left/i.test(grid)) throw new Error('the size grid leaks counts: ' + grid);
   });
 
   await page.screenshot({ path: '/root/cityjeans-drops/shot-1-product.png', fullPage: true });
@@ -67,11 +70,13 @@ const { chromium, devices } = require('playwright');
     await page.waitForSelector('#s-loc.active');
   });
 
-  await step('locations listed with per-store stock', async () => {
+  await step('locations listed without per-store counts', async () => {
     const n = await page.locator('#locs .loc').count();
     if (n < 1) throw new Error('no locations shown');
     const t = await page.textContent('#locSub');
-    if (!/store/.test(t)) throw new Error('locSub = ' + t);
+    if (!/choose where/i.test(t)) throw new Error('locSub = ' + t);
+    const locs = await page.textContent('#locs');
+    if (/\d+\s*left/i.test(locs)) throw new Error('the store list leaks counts: ' + locs);
   });
 
   await page.screenshot({ path: '/root/cityjeans-drops/shot-2-location.png', fullPage: true });
@@ -541,6 +546,67 @@ const { chromium, devices } = require('playwright');
       throw new Error('no store sections on mobile');
     if (!(await m.isVisible('#sumStores'))) throw new Error('no by-store summary on mobile');
     if (!(await m.isVisible('#sumSizes'))) throw new Error('no by-size summary on mobile');
+  });
+
+  console.log('\n--- ROLES ---');
+  await step('a staff cashier sees only the register, reservations and their password', async () => {
+    const c = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const sp = await c.newPage(); await block(sp);
+    await sp.goto('http://localhost:8900/admin.html', { waitUntil: 'domcontentloaded' });
+    await sp.fill('#e', 'zz-cashier2@cityjeans.com');
+    await sp.fill('#p', 'cashier-probe-2026');
+    await sp.click('#signin');
+    await sp.waitForSelector('#app', { state: 'visible', timeout: 20000 });
+    await sp.waitForTimeout(700);
+    const tabs = await sp.$$eval('.tab', els =>
+      els.filter(e => e.style.display !== 'none').map(e => e.textContent.trim()));
+    const want = ['Register', 'Reservations', 'Account'];
+    if (JSON.stringify(tabs) !== JSON.stringify(want))
+      throw new Error('staff tabs = ' + JSON.stringify(tabs));
+    await sp.click('.tab[data-v="v-res"]'); await sp.waitForTimeout(800);
+    if (await sp.isVisible('#csv')) throw new Error('staff can export the customer CSV');
+    await sp.click('.tab[data-v="v-acct"]'); await sp.waitForTimeout(600);
+    if (await sp.isVisible('#invite')) throw new Error('staff can create accounts');
+    if (await sp.isVisible('#staffTable')) throw new Error('staff can see the staff list');
+    await c.close();
+  });
+
+  await step('the database refuses staff writes even without the UI', async () => {
+    const r = await page2.evaluate(async ([url, key]) => {
+      const tok = await (await fetch(url + '/auth/v1/token?grant_type=password', {
+        method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'zz-cashier2@cityjeans.com', password: 'cashier-probe-2026' })
+      })).json();
+      const H = { apikey: key, Authorization: 'Bearer ' + tok.access_token, 'Content-Type': 'application/json' };
+      const call = async (fn, body) =>
+        (await (await fetch(url + '/rest/v1/rpc/' + fn, { method: 'POST', headers: H, body: JSON.stringify(body) })).json());
+      return {
+        revoke: await call('revoke_user', { p_email: 'ben@cityjeans.com' }),
+        create: await call('create_staff_account', { p_email: 'a@b.com', p_password: 'aaaaaaaaaaaa', p_role: 'owner' }),
+        list:   await call('list_staff', {})
+      };
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a']);
+    for (const [k, v] of Object.entries(r))
+      if (v.ok) throw new Error('staff was allowed to ' + k + '!');
+  });
+
+  await step('customers cannot see how many pairs are left', async () => {
+    const r = await page.evaluate(async ([url, key]) => {
+      const H = { apikey: key, Authorization: 'Bearer ' + key };
+      const rows = await (await fetch(url + '/rest/v1/release_inventory?select=*', { headers: H })).json();
+      const avail = await (await fetch(url + '/rest/v1/rpc/get_availability', {
+        method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_release_slug: 'aj4-retro-og-flight-club' }) })).json();
+      return { rows, avail };
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a']);
+    if (Array.isArray(r.rows) && r.rows.length)
+      throw new Error('anonymous can still read raw inventory rows');
+    if (!Array.isArray(r.avail) || !r.avail.length)
+      throw new Error('availability RPC returned nothing');
+    const leaks = r.avail.filter(a => 'quantity_total' in a || 'quantity_reserved' in a);
+    if (leaks.length) throw new Error('the availability RPC leaks counts');
+    const pageText = await page.textContent('#sizes');
+    if (/\d+\s*left/i.test(pageText)) throw new Error('the size grid still shows counts: ' + pageText);
   });
 
   await step('no console errors anywhere', async () => {

@@ -1,0 +1,9 @@
+-- Until now every row in public.admins had identical power, so a cashier could
+-- edit inventory, rename stores, create accounts and revoke the owner. Roles are
+-- now enforced in the database (the UI only hides what a role cannot do):
+--   staff    register + reservations; read-only elsewhere
+--   manager  everything about drops: releases, inventory, stores, reservations
+--   owner    all of the above, plus managing people
+-- See is_manager() / is_owner(), the rewritten policies on locations, releases,
+-- release_inventory, reservations, invited_emails, admins and storage.objects,
+-- and the owner-only list_staff / revoke_user / create_staff_account.

@@ -32,6 +32,7 @@
     font:inherit; font-weight:600; font-size:14px; padding:9px 14px; cursor:pointer; white-space:nowrap}
   .tab.on{color:var(--text); border-bottom-color:var(--accent)}
   .tab:disabled{opacity:.32; cursor:not-allowed}
+  body.role-staff .manager-only{display:none !important}
 
   .view{display:none; padding-top:22px} .view.on{display:block}
   h2{font-size:20px; font-weight:800; margin:0 0 4px; letter-spacing:-.01em}
@@ -328,7 +329,7 @@
     <div class="f"><input id="fQ" placeholder="Search name, email, phone or code…"></div>
     <div class="rowbtns" style="margin-bottom:14px">
       <button class="btn ghost sm" id="refreshRes">Refresh</button>
-      <button class="btn ghost sm" id="csv">Export CSV</button>
+      <button class="btn ghost sm manager-only" id="csv">Export CSV</button>
       <span class="hint" id="rcount"></span>
     </div>
     <div class="card scroll"><table id="resTable" class="stacked"></table></div>
@@ -489,8 +490,8 @@
     </div>
 
     <h3>Staff</h3>
-    <p class="sub" style="margin-top:-6px">Sign-ups are closed — you create every account
-      here. Give the person their temporary password and they change it on this tab.</p>
+    <p class="sub owner-only" style="margin-top:-6px">Sign-ups are closed — you create every
+      account here. Give the person their temporary password and they change it on this tab.</p>
     <div class="card">
       <div class="grid g3">
         <div class="f"><label>Email *</label><input id="invEmail" placeholder="name@cityjeans.com"></div>
@@ -611,12 +612,50 @@ function go(v) {
   window.scrollTo(0,0);
   if (v !== "v-reg") stopScan();
   if (v === "v-res") loadReservations();
-  if (v === "v-acct") loadStaff();
+  if (v === "v-acct" && isOwner()) loadStaff();
   if (v === "v-reg") setTimeout(() => $("rcode").focus(), 60);
 }
 
 // ── first sign-in: make them replace the temporary password ───
 let mustChange = false;
+let MYROLE = "staff";
+const canManage = () => MYROLE === "manager" || MYROLE === "owner";
+const isOwner   = () => MYROLE === "owner";
+
+// What each role is allowed to open. Enforced in Postgres too — this only
+// stops people being shown buttons that would fail.
+function applyRole() {
+  const allowed = {
+    "v-reg":  true,
+    "v-res":  true,
+    "v-rel":  canManage(),
+    "v-edit": canManage(),
+    "v-loc":  canManage(),
+    "v-acct": true
+  };
+  document.querySelectorAll(".tab").forEach(t => {
+    t.style.display = allowed[t.dataset.v] ? "" : "none";
+  });
+  // the staff section of the Account tab is for owners only
+  const staffBits = ["invEmail","invName","invRole","invPass","genPass","invite"];
+  document.querySelectorAll("#v-acct .card").forEach((c, i) => {
+    if (i > 0) c.style.display = isOwner() ? "" : "none";
+  });
+  document.querySelectorAll("#v-acct h3").forEach(h => {
+    if (/staff/i.test(h.textContent)) h.style.display = isOwner() ? "" : "none";
+  });
+  document.querySelectorAll(".owner-only").forEach(el => {
+    el.style.display = isOwner() ? "" : "none";
+  });
+  const st = $("staffTable");
+  if (st) st.closest(".card").style.display = isOwner() ? "" : "none";
+  const note = document.querySelector("#v-acct .sub");
+  if (note) note.textContent = isOwner()
+    ? "Your password, and who else can get in."
+    : "Your password.";
+  // reservations: staff can work the register but not delete history
+  document.body.classList.toggle("role-staff", !canManage());
+}
 function forcePasswordChange() {
   mustChange = true;
   go("v-acct");
@@ -1367,6 +1406,7 @@ async function boot() {
   try {
     const who = await rpc("me", {});
     const admin = who && who.ok;
+    if (admin) { MYROLE = who.role || "staff"; applyRole(); }
     if (!admin) {
       clearSession();
       $("login").style.display = "block"; $("app").style.display = "none";
@@ -1379,6 +1419,7 @@ async function boot() {
     await loadLocations(); await loadReleases();
     if (who.must_change_password) { forcePasswordChange(); return; }
     go("v-reg");
+    $("whoami").textContent = EMAIL + " · " + MYROLE;
   } catch (e) {
     clearSession();
     $("login").style.display = "block"; $("app").style.display = "none";

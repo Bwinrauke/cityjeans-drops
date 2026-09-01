@@ -88,7 +88,6 @@
     content:""; position:absolute; inset:auto 12% 50% 12%; height:1.5px;
     background:var(--muted); transform:rotate(-14deg);
   }
-  .size.low small{color:var(--warn)}
 
   /* ── location list ── */
   .loc{
@@ -377,7 +376,8 @@
   };
 
   // ── availability helpers ────────────────────────────────────
-  const left = r => Math.max(0, r.quantity_total - r.quantity_reserved);
+  // The server tells us only whether a size can still be reserved, never how many.
+  const left = r => (r.available ? 1 : 0);
   const sizeList = () => {
     const m = new Map();
     S.inv.forEach(r => {
@@ -430,14 +430,15 @@
     const list = sizeList();
     const total = list.reduce((a,s) => a + s.n, 0);
     const scale = SCALES[S.release.size_scale] || SCALES.mens;
-    $("sizeSub").textContent = scale + " · " +
-      (total ? `${total} pair${total===1?"":"s"} left across all stores`
-             : "everything is currently reserved");
+    $("sizeSub").textContent = scale +
+      (total ? "" : " · everything is currently reserved");
+    // Customers never see how many are left — only whether a size can still be
+    // reserved. Counts would tell people how the drop is allocated.
     $("sizes").innerHTML = list.map(s => {
-      const out = s.n === 0, low = s.n > 0 && s.n <= 3;
-      return `<button class="size${out ? " out" : ""}${low ? " low" : ""}${S.size===s.size?" sel":""}"
+      const out = s.n === 0;
+      return `<button class="size${out ? " out" : ""}${S.size===s.size?" sel":""}"
         ${out ? "disabled" : ""} data-size="${esc(s.size)}">${esc(s.size)}
-        <small>${out ? "Gone" : (low ? s.n + " left" : "Available")}</small></button>`;
+        <small>${out ? "Gone" : "Available"}</small></button>`;
     }).join("");
     $("sizes").querySelectorAll(".size:not(.out)").forEach(b => b.onclick = () => {
       S.size = b.dataset.size; S.loc = null; paintSizes(); paintBar("s-size");
@@ -447,12 +448,12 @@
   function paintLocs() {
     const list = locsFor(S.size);
     const tag = SCALE_TAG[S.release.size_scale] || "US";
-    $("locSub").textContent = `${tag} ${S.size} · ${list.length} store${list.length===1?"":"s"} with stock`;
+    $("locSub").textContent = `${tag} ${S.size} · choose where to collect`;
     $("locs").innerHTML = list.map(l => `
       <button class="loc${S.loc===l.id?" sel":""}" data-id="${l.id}">
         <div><div class="nm">${esc(l.name)}</div>
         ${l.address ? `<div class="ad">${esc(l.address)}</div>` : ""}</div>
-        <div class="qty"><b>${l.n}</b>left</div>
+        <div class="qty"><b>&check;</b>in stock</div>
       </button>`).join("");
     $("locs").querySelectorAll(".loc").forEach(b => b.onclick = () => {
       S.loc = b.dataset.id; paintLocs(); paintBar("s-loc");
@@ -555,7 +556,7 @@
 
   // ── boot ────────────────────────────────────────────────────
   async function loadInventory() {
-    S.inv = await api(`release_inventory?select=*&release_id=eq.${S.release.id}`);
+    S.inv = await rpc("get_availability", { p_release_slug: S.release.slug });
   }
 
   (async () => {
