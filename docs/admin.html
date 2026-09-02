@@ -9,10 +9,45 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
+  /* Dark is the base; light applies on an explicit choice or the device
+     preference, and the header toggle can force either way. */
   :root{
+    color-scheme:dark;
     --bg:#0a0a0a; --surface:#141414; --surface-2:#1c1c1c; --line:#2a2a2a;
     --text:#f5f5f5; --muted:#8f8f8f; --accent:#fff; --accent-ink:#0a0a0a;
+    --accent-ink-soft:rgba(10,10,10,.6);
     --ok:#3ddc84; --warn:#ffb020; --bad:#ff5c5c; --radius:12px;
+    --header-bg:rgba(10,10,10,.94);
+    --danger-bg:#3a1e1e; --danger-fg:#ff9c9c; --danger-line:#6b2c2c;
+    --warn-bg:#4a3b1a; --warn-fg:#ffb020;
+    --info-bg:#1e3a8a33; --info-fg:#93b4ff; --info-line:#2c4fa0;
+    --chip-bg:#2a2a2a; --chip-fg:#999; --chip2-bg:#333; --chip2-fg:#bbb;
+  }
+  :root[data-theme="light"]{
+    color-scheme:light;
+    --bg:#f6f6f7; --surface:#ffffff; --surface-2:#eeeef1; --line:#e3e3e8;
+    --text:#161616; --muted:#6a6a70; --accent:#0a0a0a; --accent-ink:#ffffff;
+    --accent-ink-soft:rgba(255,255,255,.72);
+    --ok:#1c9f5b; --warn:#b7791f; --bad:#d64545; --radius:12px;
+    --header-bg:rgba(255,255,255,.9);
+    --danger-bg:#fdeaea; --danger-fg:#b42318; --danger-line:#f2c7c4;
+    --warn-bg:#fbecc9; --warn-fg:#8a5a00;
+    --info-bg:#e6efff; --info-fg:#1d4ed8; --info-line:#c3d4f5;
+    --chip-bg:#e9e9ee; --chip-fg:#5a5a62; --chip2-bg:#e2e2e8; --chip2-fg:#4a4a52;
+  }
+  @media (prefers-color-scheme:light){
+    :root:not([data-theme="dark"]):not([data-theme="light"]){
+      color-scheme:light;
+      --bg:#f6f6f7; --surface:#ffffff; --surface-2:#eeeef1; --line:#e3e3e8;
+      --text:#161616; --muted:#6a6a70; --accent:#0a0a0a; --accent-ink:#ffffff;
+      --accent-ink-soft:rgba(255,255,255,.72);
+      --ok:#1c9f5b; --warn:#b7791f; --bad:#d64545;
+      --header-bg:rgba(255,255,255,.9);
+      --danger-bg:#fdeaea; --danger-fg:#b42318; --danger-line:#f2c7c4;
+      --warn-bg:#fbecc9; --warn-fg:#8a5a00;
+      --info-bg:#e6efff; --info-fg:#1d4ed8; --info-line:#c3d4f5;
+      --chip-bg:#e9e9ee; --chip-fg:#5a5a62; --chip2-bg:#e2e2e8; --chip2-fg:#4a4a52;
+    }
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   body{margin:0; background:var(--bg); color:var(--text);
@@ -20,12 +55,23 @@
     font-size:15px; line-height:1.45; -webkit-font-smoothing:antialiased}
   .wrap{max-width:1080px; margin:0 auto; padding:0 16px 80px}
 
-  header{position:sticky; top:0; z-index:30; background:rgba(10,10,10,.94);
+  header{position:sticky; top:0; z-index:30; background:var(--header-bg);
     backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
     padding:calc(12px + env(safe-area-inset-top)) 16px 0}
   .hbar{max-width:1080px; margin:0 auto; display:flex; align-items:center; gap:12px; padding-bottom:12px}
   .logo{font-weight:900; letter-spacing:.14em; font-size:13px}
   .who{margin-left:auto; color:var(--muted); font-size:12px; display:flex; align-items:center; gap:10px}
+  .themebtn{flex:none; width:50px; height:26px; border-radius:99px;
+    border:1px solid var(--line); background:var(--surface-2); position:relative;
+    cursor:pointer; padding:0; transition:.18s}
+  .themebtn .knob{position:absolute; top:2px; left:2px; width:20px; height:20px;
+    border-radius:50%; background:var(--accent); color:var(--accent-ink);
+    display:flex; align-items:center; justify-content:center; font-size:11px;
+    transition:transform .2s ease}
+  .themebtn.is-light .knob{transform:translateX(24px)}
+  .themebtn .knob .sun{display:none}
+  .themebtn.is-light .knob .sun{display:block}
+  .themebtn.is-light .knob .moon{display:none}
   .tabs{max-width:1080px; margin:0 auto; display:flex; gap:2px; overflow-x:auto; scrollbar-width:none}
   .tabs::-webkit-scrollbar{display:none}
   .tab{background:none; border:0; border-bottom:2px solid transparent; color:var(--muted);
@@ -72,17 +118,17 @@
 
   .pill{display:inline-block; padding:3px 9px; border-radius:99px; font-size:10px;
     font-weight:800; letter-spacing:.08em; text-transform:uppercase}
-  .p-open{background:var(--ok); color:#0a0a0a}
-  .p-draft{background:#333; color:#bbb}
-  .p-closed{background:#4a3b1a; color:var(--warn)}
-  .p-archived{background:#2a2a2a; color:#777}
+  .p-open{background:var(--ok); color:var(--accent-ink)}
+  .p-draft{background:var(--chip2-bg); color:var(--chip2-fg)}
+  .p-closed{background:var(--warn-bg); color:var(--warn-fg)}
+  .p-archived{background:var(--chip-bg); color:var(--chip-fg)}
   .relstate{display:inline-block; padding:2px 8px; border-radius:99px; font-size:9px;
     font-weight:800; letter-spacing:.06em; text-transform:uppercase; vertical-align:middle}
-  .relstate.shut{background:#3a1e1e; color:#ff9c9c}
-  .relstate.ended{background:#2a2a2a; color:#999}
-  .p-confirmed{background:#1e3a8a33; color:#93b4ff; border:1px solid #2c4fa0}
-  .p-picked_up{background:var(--ok); color:#0a0a0a}
-  .p-cancelled,.p-no_show{background:#3a1e1e; color:#ff9c9c}
+  .relstate.shut{background:var(--danger-bg); color:var(--danger-fg)}
+  .relstate.ended{background:var(--chip-bg); color:var(--chip-fg)}
+  .p-confirmed{background:var(--info-bg); color:var(--info-fg); border:1px solid var(--info-line)}
+  .p-picked_up{background:var(--ok); color:var(--accent-ink)}
+  .p-cancelled,.p-no_show{background:var(--danger-bg); color:var(--danger-fg)}
 
   .chips{display:flex; flex-wrap:wrap; gap:8px}
   .chip{display:inline-flex; align-items:center; gap:7px; background:var(--surface-2);
@@ -193,8 +239,8 @@
   .result{border-radius:14px; padding:22px; text-align:center; margin-top:18px; display:none}
   .result.show{display:block}
   .result.good{background:var(--ok); color:#0a0a0a}
-  .result.bad{background:#3a1e1e; border:1px solid #6b2c2c; color:#ffb3b3}
-  .result.warn{background:#4a3b1a; border:1px solid #7a6320; color:#ffd98a}
+  .result.bad{background:var(--danger-bg); border:1px solid var(--danger-line); color:var(--danger-fg)}
+  .result.warn{background:var(--warn-bg); border:1px solid var(--warn-fg); color:var(--warn-fg)}
   .result .why{font-size:14px; font-weight:600; margin-bottom:14px; line-height:1.5}
   .result .act{margin-top:16px; display:flex; gap:9px; flex-wrap:wrap; justify-content:center}
   .result .big{font-size:22px; font-weight:900; margin-bottom:10px}
@@ -213,7 +259,7 @@
     font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap}
   .chk input{width:auto; margin:0; accent-color:var(--accent)}
   tr.arch{opacity:.5}
-  .p-archived-row{background:#2a2a2a; color:#999}
+  .p-archived-row{background:var(--chip-bg); color:var(--chip-fg)}
   code{background:var(--surface-2); padding:2px 6px; border-radius:5px; font-size:13px}
 
   /* ══════════════ phones ══════════════ */
@@ -288,6 +334,12 @@
 </style>
 </head>
 <body>
+<script>
+  try {
+    var _t = localStorage.getItem("drops_theme");
+    if (_t === "light" || _t === "dark") document.documentElement.dataset.theme = _t;
+  } catch (e) {}
+</script>
 
 <!-- ── LOGIN ───────────────────────────────────────────── -->
 <div id="login" class="login">
@@ -308,6 +360,9 @@
     <span class="logo" id="appLogo">CITY JEANS</span>
     <span class="sub-label" style="color:var(--muted);font-size:13px">Drops admin</span>
     <span class="who"><span id="whoami"></span>
+      <button class="themebtn" id="themebtn" title="Light / dark" aria-label="Toggle light or dark mode">
+        <span class="knob"><span class="moon">☾</span><span class="sun">☀</span></span>
+      </button>
       <button class="btn ghost sm" id="signout">Sign out</button></span>
   </div>
   <nav class="tabs">
@@ -602,6 +657,28 @@
 (() => {
 const CFG = window.DROPS_CONFIG;
 const $ = id => document.getElementById(id);
+
+// ── light / dark ──────────────────────────────────────────────
+(function theme() {
+  const root = document.documentElement, btn = $("themebtn");
+  if (!btn) return;
+  const media = window.matchMedia("(prefers-color-scheme: light)");
+  const effective = () => root.dataset.theme || (media.matches ? "light" : "dark");
+  function paint() {
+    const light = effective() === "light";
+    btn.classList.toggle("is-light", light);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", light ? "#f6f6f7" : "#0a0a0a");
+  }
+  btn.onclick = () => {
+    const next = effective() === "light" ? "dark" : "light";
+    root.dataset.theme = next;
+    try { localStorage.setItem("drops_theme", next); } catch (e) {}
+    paint();
+  };
+  media.addEventListener && media.addEventListener("change", () => { if (!root.dataset.theme) paint(); });
+  paint();
+})();
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 let TOKEN = localStorage.getItem("drops_at") || null;
 let REFRESH = localStorage.getItem("drops_rt") || null;
@@ -801,7 +878,7 @@ async function paintRaffle() {
 
   const dq = st.duplicates || 0;
   const dqNote = dq > 0
-    ? `<div class="card" style="margin-top:12px;border-color:#4a3b1a">
+    ? `<div class="card" style="margin-top:12px;border-color:var(--warn-bg)">
          <b>${dq} entr${dq === 1 ? "y is" : "ies are"} from ${st.duplicate_people}
          ${st.duplicate_people === 1 ? "person" : "people"} who entered more than once.</b>
          <p class="hint" style="margin-top:6px">All of them come out at the draw — the

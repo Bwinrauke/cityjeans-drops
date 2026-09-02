@@ -9,11 +9,38 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
+  /* Dark is the base. Light is applied either by an explicit choice
+     (data-theme="light") or by the device preference when nothing is chosen,
+     and the toggle can force either way. */
   :root{
+    color-scheme:dark;
     --bg:#0a0a0a; --surface:#141414; --surface-2:#1e1e1e; --line:#2a2a2a;
-    --text:#f5f5f5; --muted:#8f8f8f; --accent:#fff; --accent-ink:#0a0a0a;
+    --text:#f5f5f5; --muted:#8f8f8f; --accent:#fff; --accent-ink:#0a0a0a; --accent-ink-soft:rgba(10,10,10,.6);
     --ok:#3ddc84; --warn:#ffb020; --bad:#ff5c5c;
+    --header-bg:rgba(10,10,10,.92);
+    --danger-bg:#3a1e1e; --danger-fg:#ff9c9c; --danger-line:#6b2c2c;
+    --chip-bg:#2a2a2a; --chip-fg:#bbb;
     --radius:14px; --pad:20px;
+  }
+  :root[data-theme="light"], :root.light-vars{
+    color-scheme:light;
+    --bg:#f6f6f7; --surface:#ffffff; --surface-2:#eeeef1; --line:#e3e3e8;
+    --text:#161616; --muted:#6a6a70; --accent:#0a0a0a; --accent-ink:#ffffff; --accent-ink-soft:rgba(255,255,255,.72);
+    --ok:#1c9f5b; --warn:#b7791f; --bad:#d64545;
+    --header-bg:rgba(255,255,255,.9);
+    --danger-bg:#fdeaea; --danger-fg:#b42318; --danger-line:#f2c7c4;
+    --chip-bg:#e9e9ee; --chip-fg:#5a5a62;
+  }
+  @media (prefers-color-scheme:light){
+    :root:not([data-theme="dark"]):not([data-theme="light"]){
+      color-scheme:light;
+      --bg:#f6f6f7; --surface:#ffffff; --surface-2:#eeeef1; --line:#e3e3e8;
+      --text:#161616; --muted:#6a6a70; --accent:#0a0a0a; --accent-ink:#ffffff; --accent-ink-soft:rgba(255,255,255,.72);
+      --ok:#1c9f5b; --warn:#b7791f; --bad:#d64545;
+      --header-bg:rgba(255,255,255,.9);
+      --danger-bg:#fdeaea; --danger-fg:#b42318; --danger-line:#f2c7c4;
+      --chip-bg:#e9e9ee; --chip-fg:#5a5a62;
+    }
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   html,body{margin:0; padding:0}
@@ -27,7 +54,7 @@
 
   /* ── header ── */
   header{
-    position:sticky; top:0; z-index:20; background:rgba(10,10,10,.92);
+    position:sticky; top:0; z-index:20; background:var(--header-bg);
     backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
     padding:calc(14px + env(safe-area-inset-top)) var(--pad) 14px;
     display:flex; align-items:center; gap:12px;
@@ -41,6 +68,19 @@
   .steps{margin-left:auto; display:flex; gap:5px}
   .dot{width:6px; height:6px; border-radius:50%; background:var(--line)}
   .dot.on{background:var(--accent)}
+
+  /* light / dark slider */
+  .themebtn{margin-left:12px; flex:none; width:52px; height:28px; border-radius:99px;
+    border:1px solid var(--line); background:var(--surface-2); position:relative;
+    cursor:pointer; padding:0; transition:.18s}
+  .themebtn .knob{position:absolute; top:2px; left:2px; width:22px; height:22px;
+    border-radius:50%; background:var(--accent); color:var(--accent-ink);
+    display:flex; align-items:center; justify-content:center; font-size:12px;
+    transition:transform .2s ease}
+  .themebtn.is-light .knob{transform:translateX(24px)}
+  .themebtn .knob .sun{display:none}
+  .themebtn.is-light .knob .sun{display:block}
+  .themebtn.is-light .knob .moon{display:none}
 
   /* --bar-h is measured from the real sticky bar at runtime, so the last row
      of sizes is never hidden behind it on a short phone. */
@@ -94,7 +134,7 @@
     background:var(--surface-2); color:var(--muted); border:1px solid var(--line);
   }
   .tagp.price{background:transparent; color:var(--text); border-color:var(--line)}
-  .tagp.gone{background:#3a1e1e; color:#ff9c9c; border-color:#6b2c2c}
+  .tagp.gone{background:var(--danger-bg); color:var(--danger-fg); border-color:var(--danger-line)}
   .rel .go{color:var(--muted); font-size:20px; flex:none}
   .rel.out{opacity:.5}
 
@@ -108,7 +148,7 @@
   .size small{display:block; font-size:10px; font-weight:600; color:var(--muted); margin-top:3px; letter-spacing:.03em}
   .size:active{transform:scale(.96)}
   .size.sel{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
-  .size.sel small{color:rgba(10,10,10,.6)}
+  .size.sel small{color:var(--accent-ink-soft)}
   .size.out{opacity:.32; cursor:not-allowed}
   .size.out::after{
     content:""; position:absolute; inset:auto 12% 50% 12%; height:1.5px;
@@ -226,8 +266,8 @@
     font-weight:800; letter-spacing:.1em; text-transform:uppercase;
   }
   .pill.ok{background:#0a0a0a; color:#fff}
-  .pill.done{background:var(--ok); color:#0a0a0a}
-  .pill.dead{background:#ddd; color:#666}
+  .pill.done{background:var(--ok); color:var(--accent-ink)}
+  .pill.dead{background:var(--chip-bg); color:var(--chip-fg)}
 
   .center{text-align:center; padding:70px 20px; color:var(--muted)}
   .statebox{background:var(--surface); border:1px solid var(--line);
@@ -235,15 +275,15 @@
   .statebox .tag{display:inline-block; padding:5px 12px; border-radius:99px;
     font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
     margin-bottom:12px}
-  .statebox .tag.shut{background:#3a1e1e; color:#ff9c9c; border:1px solid #6b2c2c}
-  .statebox .tag.ended{background:#2a2a2a; color:#bbb; border:1px solid var(--line)}
+  .statebox .tag.shut{background:var(--danger-bg); color:var(--danger-fg); border:1px solid var(--danger-line)}
+  .statebox .tag.ended{background:var(--chip-bg); color:var(--chip-fg); border:1px solid var(--line)}
   .statebox h3{margin:0 0 8px; font-size:19px; color:var(--text)}
   .statebox p{margin:0; font-size:14px; line-height:1.5}
   /* a small inline banner for the admin/list context reuse */
   .relstate{display:inline-block; padding:3px 9px; border-radius:99px; font-size:10px;
     font-weight:800; letter-spacing:.06em; text-transform:uppercase; margin-left:6px}
-  .relstate.shut{background:#3a1e1e; color:#ff9c9c}
-  .relstate.ended{background:#2a2a2a; color:#999}
+  .relstate.shut{background:var(--danger-bg); color:var(--danger-fg)}
+  .relstate.ended{background:var(--chip-bg); color:var(--chip-fg)}
   .center h3{color:var(--text); font-size:19px; margin:0 0 8px}
   .spin{
     width:26px; height:26px; border:2.5px solid var(--line); border-top-color:var(--accent);
@@ -255,6 +295,14 @@
 </style>
 </head>
 <body>
+<script>
+  // Set the theme before first paint so there is no flash. Only an explicit
+  // choice writes an attribute; with none, the device preference decides.
+  try {
+    var _t = localStorage.getItem("drops_theme");
+    if (_t === "light" || _t === "dark") document.documentElement.dataset.theme = _t;
+  } catch (e) {}
+</script>
 <div class="wrap">
   <header>
     <button class="back" id="back">← Back</button>
@@ -262,6 +310,9 @@
     <span class="steps" id="steps">
       <i class="dot on"></i><i class="dot"></i><i class="dot"></i><i class="dot"></i>
     </span>
+    <button class="themebtn" id="themebtn" title="Light / dark" aria-label="Toggle light or dark mode">
+      <span class="knob"><span class="moon">☾</span><span class="sun">☀</span></span>
+    </button>
   </header>
 
   <main>
@@ -371,6 +422,28 @@
   const CFG = window.DROPS_CONFIG;
   const H = { apikey: CFG.SUPABASE_KEY, Authorization: "Bearer " + CFG.SUPABASE_KEY };
   const $ = id => document.getElementById(id);
+
+  // ── light / dark ──────────────────────────────────────────────
+  (function theme() {
+    const root = document.documentElement, btn = $("themebtn");
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const effective = () => root.dataset.theme || (media.matches ? "light" : "dark");
+    function paint() {
+      const light = effective() === "light";
+      btn.classList.toggle("is-light", light);
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", light ? "#f6f6f7" : "#0a0a0a");
+    }
+    btn.onclick = () => {
+      const next = effective() === "light" ? "dark" : "light";
+      root.dataset.theme = next;
+      try { localStorage.setItem("drops_theme", next); } catch (e) {}
+      paint();
+    };
+    // if the viewer never chose, follow the device as it changes
+    media.addEventListener && media.addEventListener("change", () => { if (!root.dataset.theme) paint(); });
+    paint();
+  })();
 
   const api = (path) => fetch(CFG.SUPABASE_URL + "/rest/v1/" + path, { headers: H })
     .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t))));
