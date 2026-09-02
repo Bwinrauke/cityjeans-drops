@@ -98,6 +98,10 @@
 
   .storeacc{border:1px solid var(--line); border-radius:11px; background:var(--surface-2);
     margin-bottom:8px; overflow:hidden}
+  #rulesCard > summary{cursor:pointer; font-size:14px; color:var(--muted)}
+  #rulesText{min-height:220px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:13px; line-height:1.6}
+
   .storeacc > summary{list-style:none; cursor:pointer; padding:12px 14px;
     display:flex; align-items:center; gap:10px; justify-content:space-between}
   .storeacc > summary::-webkit-details-marker{display:none}
@@ -129,6 +133,20 @@
   .sumbox div:last-child{border-bottom:0}
   .sumbox .z{color:var(--muted)}
   .sumbox b{font-variant-numeric:tabular-nums}
+  .steps4{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:6px 0 20px}
+  .stepc{background:var(--surface); border:1px solid var(--line); border-radius:11px;
+    padding:11px 12px}
+  .stepc.now{border-color:var(--accent); background:var(--surface-2)}
+  .stepc.done{opacity:.55}
+  .stepc b{display:block; font-size:12px; font-weight:800; margin-bottom:2px}
+  .stepc span{color:var(--muted); font-size:11.5px; line-height:1.35; display:block}
+  @media(max-width:720px){.steps4{grid-template-columns:1fr 1fr}}
+  .bucket td{font-size:13.5px}
+  .bucket .over{color:var(--warn); font-weight:700}
+  .drawbox{border:1px solid var(--line); border-radius:12px; padding:16px;
+    background:var(--surface-2); margin-top:14px}
+  .seed{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px;
+    color:var(--muted); word-break:break-all}
   .grandtotal{margin-top:14px; padding:13px 15px; border-radius:11px;
     background:var(--surface-2); border:1px solid var(--line);
     font-weight:800; font-size:15px; display:flex; justify-content:space-between}
@@ -172,6 +190,9 @@
   .result.show{display:block}
   .result.good{background:var(--ok); color:#0a0a0a}
   .result.bad{background:#3a1e1e; border:1px solid #6b2c2c; color:#ffb3b3}
+  .result.warn{background:#4a3b1a; border:1px solid #7a6320; color:#ffd98a}
+  .result .why{font-size:14px; font-weight:600; margin-bottom:14px; line-height:1.5}
+  .result .act{margin-top:16px; display:flex; gap:9px; flex-wrap:wrap; justify-content:center}
   .result .big{font-size:22px; font-weight:900; margin-bottom:10px}
   .result .rows{text-align:left; margin-top:14px; font-size:14px}
   .result .rows div{display:flex; justify-content:space-between; padding:4px 0}
@@ -291,6 +312,8 @@
     <button class="tab" data-v="v-rel">Releases</button>
     <button class="tab" data-v="v-edit">New / Edit release</button>
     <button class="tab" data-v="v-loc">Stores</button>
+    <button class="tab" data-v="v-raffle">Raffle</button>
+    <button class="tab" data-v="v-susp">Suspended</button>
     <button class="tab" data-v="v-acct">Account</button>
   </nav>
 </header>
@@ -302,6 +325,11 @@
     <div class="reg">
       <h2>Register</h2>
       <p class="sub">Scan the customer's QR or type their code, then hand over the pair.</p>
+      <div class="f"><label>This register is at</label>
+        <select id="regStore"></select>
+        <p class="hint">Remembered on this device. A code for another store is
+          refused, so a pair never leaves the wrong shelf by accident.</p>
+      </div>
       <div class="scanwrap" id="scanwrap">
         <button class="close" id="scanStop">Stop</button>
         <video id="scanvid" playsinline muted></video>
@@ -482,6 +510,41 @@
     <div class="card scroll" style="margin-top:12px"><table id="locTable" class="stacked"></table></div>
   </section>
 
+  <!-- RAFFLE -->
+  <section class="view" id="v-raffle">
+    <h2>Raffle</h2>
+    <p class="sub">Entries come in first. You allocate against real demand, then draw.</p>
+    <div class="f" style="max-width:520px"><label>Raffle release</label>
+      <select id="rafRel"></select></div>
+    <div class="msg" id="rafMsg"></div>
+    <div id="rafBody"></div>
+
+    <details class="card" id="rulesCard" style="margin-top:16px">
+      <summary><b>Raffle rules</b> — shown on the entry form, ticked before entering</summary>
+      <p class="hint" style="margin-top:10px">Editing publishes a new version.
+        Entries keep the version number they agreed to, so an old entry still
+        points at the text that was on screen when it was made.</p>
+      <textarea id="rulesText" rows="12" style="margin-top:10px"></textarea>
+      <div class="rowbtns" style="margin-top:10px">
+        <button class="btn sm" id="rulesSave">Publish new version</button>
+        <span class="hint" id="rulesVer"></span>
+      </div>
+      <div class="msg" id="rulesMsg"></div>
+    </details>
+  </section>
+
+  <!-- SUSPENDED -->
+  <section class="view" id="v-susp">
+    <h2>Suspended</h2>
+    <p class="sub">Two missed pickups in a row pauses someone for 90 days. It lifts on its own.</p>
+    <div class="rowbtns" style="margin-bottom:12px">
+      <label class="chk"><input type="checkbox" id="suspPast"> Show expired and lifted</label>
+      <button class="btn sm ghost" id="suspRefresh">Refresh</button>
+    </div>
+    <div class="msg" id="suspMsg"></div>
+    <div class="card scroll"><table id="suspTable" class="stacked"></table></div>
+  </section>
+
   <!-- ACCOUNT -->
   <section class="view" id="v-acct">
     <h2>Account</h2>
@@ -621,6 +684,8 @@ function go(v) {
   if (v !== "v-reg") stopScan();
   if (v === "v-res") loadReservations();
   if (v === "v-acct" && isOwner()) loadStaff();
+  if (v === "v-raffle") loadRaffle();
+  if (v === "v-susp") loadSuspensions();
   if (v === "v-reg") setTimeout(() => $("rcode").focus(), 60);
 }
 
@@ -639,6 +704,10 @@ function applyRole() {
     "v-rel":  canManage(),
     "v-edit": canManage(),
     "v-loc":  canManage(),
+    "v-raffle": canManage(),
+    // a cashier is the one who gets asked why a booking was refused, so they
+    // can read the list — the Reactivate button is what managers alone get
+    "v-susp": true,
     "v-acct": true
   };
   document.querySelectorAll(".tab").forEach(t => {
@@ -680,6 +749,167 @@ function releasePasswordLock() {
   mustChange = false;
   document.querySelectorAll(".tab").forEach(t => t.disabled = false);
 }
+
+// ── raffle ────────────────────────────────────────────────────
+async function loadRaffle() {
+  // Whether the draw is unlocked turns on the close time, so this tab always
+  // re-reads the releases rather than trusting whatever was cached when the
+  // panel was opened — a stale close time would hide the draw button.
+  try { await loadReleases(); } catch {}
+  $("rafMsg").classList.remove("show");
+  loadRules();
+  const raffles = state.releases.filter(r => r.mode === "raffle");
+  const keep = $("rafRel").value;
+  $("rafRel").innerHTML = raffles.length
+    ? raffles.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join("")
+    : `<option value="">No raffle releases yet</option>`;
+  if (raffles.some(r => r.id === keep)) $("rafRel").value = keep;
+
+  if (!raffles.length) {
+    $("rafBody").innerHTML = `<p class="empty">Create a release and set its mode to
+      <b>Raffle</b>, tick the sizes it comes in, and leave the quantities at zero
+      until entries close.</p>`;
+    return;
+  }
+  paintRaffle();
+}
+
+async function paintRaffle() {
+  const id = $("rafRel").value;
+  if (!id) return;
+  const rel = state.releases.find(r => r.id === id);
+  let st;
+  try { st = await rpc("raffle_stats", { p_release_id: id }); }
+  catch { $("rafBody").innerHTML = `<p class="empty">Could not load entries.</p>`; return; }
+  if (!st || !st.ok) {
+    $("rafBody").innerHTML = `<p class="empty">${esc((st && st.error) || "Not allowed")}</p>`;
+    return;
+  }
+
+  const closed = rel.closes_at && new Date(rel.closes_at) <= new Date();
+  const pairs = (st.buckets || []).reduce((a, b) => a + b.pairs, 0);
+  const stage = st.drawn ? 4 : (pairs > 0 && closed ? 3 : (closed ? 2 : 1));
+  const cls = n => stage === n ? "stepc now" : (stage > n ? "stepc done" : "stepc");
+
+  const dq = st.duplicates || 0;
+  const dqNote = dq > 0
+    ? `<div class="card" style="margin-top:12px;border-color:#4a3b1a">
+         <b>${dq} entr${dq === 1 ? "y is" : "ies are"} from ${st.duplicate_people}
+         ${st.duplicate_people === 1 ? "person" : "people"} who entered more than once.</b>
+         <p class="hint" style="margin-top:6px">All of them come out at the draw — the
+           counts and odds below already exclude them. Nobody is banned; they can
+           enter the next drop.</p></div>`
+    : "";
+
+  const steps = `<div class="steps4">
+    <div class="${cls(1)}"><b>1 · Entries open</b><span>${st.total} so far</span></div>
+    <div class="${cls(2)}"><b>2 · Entries close</b><span>${
+      rel.closes_at ? esc(new Date(rel.closes_at).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})) : "no close time set"
+    }</span></div>
+    <div class="${cls(3)}"><b>3 · Load pairs</b><span>${pairs} allocated</span></div>
+    <div class="${cls(4)}"><b>4 · Draw</b><span>${st.drawn ? "done" : "not yet"}</span></div>
+  </div>`;
+
+  const rows = (st.buckets || []).map(b => `<tr>
+      <td data-l="Store">${esc(b.location)}</td>
+      <td data-l="Size"><b>${esc(b.size)}</b></td>
+      <td data-l="Entries">${b.entries}</td>
+      <td data-l="Pairs">${b.pairs}</td>
+      <td data-l="Odds" class="${b.pairs === 0 ? "over" : ""}">${
+        b.pairs === 0 ? "no pairs — everyone loses"
+                      : "1 in " + (b.entries / b.pairs).toFixed(1)}</td>
+    </tr>`).join("");
+
+  let action;
+  if (st.drawn) {
+    const d = st.draw || {};
+    action = `<div class="drawbox">
+      <b>Drawn ${esc(new Date(d.ran_at).toLocaleString())}</b>
+      <p class="hint">${d.winners} winners from ${d.entries} entries; ${d.losers} not selected${
+        st.disqualified ? `; ${st.disqualified} disqualified for multiple entries` : ""}.
+        Winners became ordinary reservations with pickup codes and have been emailed.</p>
+      <p class="hint" style="margin-top:10px">Verification seed — keep this. With it and the
+        entry list, the exact winners can be recomputed by anyone:</p>
+      <div class="seed">${esc(d.seed || "")}</div>
+    </div>`;
+  } else if (!closed) {
+    action = `<div class="drawbox"><b>Entries are still open</b>
+      <p class="hint">The draw unlocks once the close time passes. Load the pairs
+        per store first — you can see the demand above.</p></div>`;
+  } else if (pairs === 0) {
+    action = `<div class="drawbox"><b>No pairs loaded yet</b>
+      <p class="hint">Open this release on the <b>New / Edit release</b> tab and set the
+        quantity for each size at each store. Then come back and draw.</p></div>`;
+  } else {
+    action = `<div class="drawbox">
+      <b>Ready to draw</b>
+      <p class="hint">${st.total} entries, ${pairs} pairs${
+        dq > 0 ? `, plus ${dq} that will be disqualified` : ""}. Each store and size is
+        drawn separately, up to the number you loaded. Winners get pickup codes and an
+        email; everyone else is emailed too. This can only be run once.</p>
+      <div class="rowbtns" style="margin-top:12px">
+        <button class="btn" id="rafDraw">Run the draw</button>
+      </div>
+    </div>`;
+  }
+
+  $("rafBody").innerHTML = steps + dqNote +
+    `<div class="card scroll"><table class="stacked bucket">
+       <thead><tr><th>Store</th><th>Size</th><th>Entries</th><th>Pairs</th><th>Odds</th></tr></thead>
+       <tbody>${rows || `<tr><td colspan="5" data-l="" class="empty">No entries yet.</td></tr>`}</tbody>
+     </table></div>` + action;
+
+  const btn = $("rafDraw");
+  if (btn) btn.onclick = async () => {
+    if (!confirm(`Draw ${st.total} entries for ${pairs} pairs?\n\n` +
+                 `Winners are picked at random per store and size, turned into ` +
+                 `reservations, and emailed. Everyone else is emailed too.\n\n` +
+                 `This cannot be undone or run again.`)) return;
+    btn.disabled = true; btn.textContent = "Drawing…";
+    const m = $("rafMsg");
+    try {
+      const r = await rpc("run_raffle_draw", { p_release_id: id });
+      m.className = "msg " + (r.ok ? "ok" : "err") + " show";
+      m.textContent = r.message || r.error;
+      if (r.ok) { await loadReleases(); await paintRaffle(); }
+    } catch (e) {
+      m.className = "msg err show"; m.textContent = "Draw failed: " + e.message;
+    }
+    btn.disabled = false; btn.textContent = "Run the draw";
+  };
+}
+
+$("rafRel").addEventListener("change", () => {
+  $("rafMsg").classList.remove("show");
+  paintRaffle();
+});
+
+// ── raffle rules ──────────────────────────────────────────────
+async function loadRules() {
+  $("rulesCard").style.display = canManage() ? "" : "none";
+  if (!canManage()) return;
+  try {
+    const r = await rpc("current_raffle_rules", {});
+    $("rulesText").value = (r && r.body) || "";
+    $("rulesVer").textContent = r
+      ? `Version ${r.version}, saved ${new Date(r.updated_at).toLocaleDateString()}`
+      : "No rules saved yet";
+  } catch { $("rulesVer").textContent = "Could not load the rules."; }
+}
+
+$("rulesSave").onclick = async () => {
+  const m = $("rulesMsg"), btn = $("rulesSave");
+  btn.disabled = true;
+  try {
+    const r = await rpc("save_raffle_rules", { p_body: $("rulesText").value });
+    m.className = "msg " + (r.ok ? "ok" : "err") + " show";
+    m.textContent = r.message || r.error;
+    if (r.ok) await loadRules();
+  } catch (e) {
+    m.className = "msg err show"; m.textContent = "Could not save: " + e.message;
+  }
+  btn.disabled = false;
+};
 
 // ── account: password ─────────────────────────────────────────
 $("savePw").onclick = async () => {
@@ -845,6 +1075,13 @@ async function startScan() {
 }
 
 function onScanned(text) {
+  if (!regStoreId()) {
+    stopScan();
+    const box = $("rresult");
+    box.className = "result show bad";
+    box.innerHTML = `<div class="big">Pick which store this register is at first</div>`;
+    return;
+  }
   // Accept a bare code or a URL that ends in one.
   const m = String(text).toUpperCase().match(/CJ-[0-9A-Z]{6}/);
   const code = m ? m[0] : String(text).trim().toUpperCase();
@@ -873,30 +1110,153 @@ window.addEventListener("pagehide", stopScan);
 // ── register / redeem ─────────────────────────────────────────
 $("rcode").addEventListener("input", e => e.target.value = e.target.value.toUpperCase().trim());
 $("rcode").addEventListener("keydown", e => { if (e.key === "Enter") $("rgo").click(); });
+function regStoreId() { return $("regStore").value || null; }
+
+function paintRedeem(r, code) {
+  const box = $("rresult");
+  const res = r.reservation;
+  const rows = res ? `<div class="rows">
+      <div><span class="k">Shoe</span><span class="v">${esc(res.release)}</span></div>
+      <div><span class="k">Size</span><span class="v">${esc(res.size)}</span></div>
+      <div><span class="k">Name</span><span class="v">${esc(res.first_name)} ${esc(res.last_name)}</span></div>
+      <div><span class="k">Held at</span><span class="v">${esc(res.location || r.held_at || "")}</span></div>
+      <div><span class="k">Phone</span><span class="v">${esc(res.phone || "")}</span></div>
+    </div>` : "";
+
+  if (r.ok) {
+    box.className = "result show good";
+    box.innerHTML = `<div class="big">✓ Picked up — hand over the pair</div>` +
+      (r.moved ? `<div class="why">Released at ${esc(r.collected_at)}, not ${esc(r.held_at)} — logged as an override.</div>` : "") +
+      rows;
+    $("rcode").value = "";
+    return;
+  }
+
+  if (r.error === "wrong_store") {
+    box.className = "result show warn";
+    box.innerHTML =
+      `<div class="big">Wrong store</div>
+       <div class="why">This pair is held at <b>${esc(r.held_at)}</b>.<br>
+         Send the customer there, or have a manager release it here.</div>` +
+      rows +
+      (r.can_override
+        ? `<div class="act">
+             <button class="btn ghost sm" id="ovYes">Release it here anyway</button>
+             <button class="btn ghost sm" id="ovNo">Cancel</button>
+           </div>`
+        : `<div class="why" style="margin:14px 0 0">A manager or owner has to approve this.</div>`);
+    if (r.can_override) {
+      $("ovYes").onclick = async () => {
+        const why = prompt(
+          `Release a pair held at ${r.held_at} to a customer standing in another store?\n\n` +
+          `Both stores' counts will be off until someone reconciles them.\n\n` +
+          `Reason (recorded against this pickup):`, "customer came to the wrong store");
+        if (why === null) return;
+        const again = await rpc("redeem_reservation", {
+          p_code: code, p_at_location: regStoreId(), p_override: true, p_reason: why });
+        paintRedeem(again, code);
+      };
+      $("ovNo").onclick = () => { box.classList.remove("show"); $("rcode").focus(); };
+    }
+    return;
+  }
+
+  box.className = "result show bad";
+  box.innerHTML = `<div class="big">${esc(r.message || "Something went wrong")}</div>` + rows;
+}
+
 $("rgo").onclick = async () => {
   const box = $("rresult"), code = $("rcode").value.trim();
   box.classList.remove("show");
   if (!code) return;
+  if (!regStoreId()) {
+    box.className = "result show bad";
+    box.innerHTML = `<div class="big">Pick which store this register is at first</div>`;
+    return;
+  }
   $("rgo").disabled = true;
   try {
-    const r = await rpc("redeem_reservation", { p_code: code });
-    const res = r.reservation;
-    const rows = res ? `<div class="rows">
-        <div><span class="k">Shoe</span><span class="v">${esc(res.release)}</span></div>
-        <div><span class="k">Size</span><span class="v">US ${esc(res.size)}</span></div>
-        <div><span class="k">Name</span><span class="v">${esc(res.first_name)} ${esc(res.last_name)}</span></div>
-        <div><span class="k">Store</span><span class="v">${esc(res.location)}</span></div>
-        <div><span class="k">Phone</span><span class="v">${esc(res.phone)}</span></div>
-      </div>` : "";
-    box.className = "result show " + (r.ok ? "good" : "bad");
-    box.innerHTML = `<div class="big">${r.ok ? "✓ Picked up — hand over the pair" : esc(r.message)}</div>${rows}`;
-    if (r.ok) { $("rcode").value = ""; }
+    const r = await rpc("redeem_reservation", { p_code: code, p_at_location: regStoreId() });
+    paintRedeem(r, code);
   } catch (e) {
     box.className = "result show bad";
     box.innerHTML = `<div class="big">Something went wrong</div>`;
   }
   $("rgo").disabled = false; $("rcode").focus();
 };
+
+// ── suspended accounts ────────────────────────────────────────
+const fmtPhone = p => {
+  const d = String(p || "").replace(/\D/g, "");
+  return d.length === 10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (p || "—");
+};
+// Every cashier can read this, because "why can't I book?" is asked at the
+// register. Only a manager can end one early, and the reason is kept.
+async function loadSuspensions() {
+  const t = $("suspTable");
+  let r;
+  try { r = await rpc("list_suspensions", { p_include_past: $("suspPast").checked }); }
+  catch { t.innerHTML = `<tbody><tr><td class="empty">Could not load the list.</td></tr></tbody>`; return; }
+  if (!r || !r.ok) {
+    t.innerHTML = `<tbody><tr><td class="empty">${esc((r && r.error) || "Not allowed")}</td></tr></tbody>`;
+    return;
+  }
+
+  const rows = r.rows || [];
+  const live = rows.filter(x => x.active).length;
+  $("suspSummary") && ($("suspSummary").textContent = live);
+
+  t.innerHTML = `<thead><tr><th>Who</th><th>Since</th><th>Until</th>
+      <th>Missed</th><th>Status</th><th></th></tr></thead><tbody>` +
+    (rows.length ? rows.map(s => {
+      const name = [s.first_name, s.last_name].filter(Boolean).join(" ") || s.email;
+      const until = new Date(s.until);
+      const status = s.lifted_at
+        ? `<span class="pill p-draft">Lifted</span>`
+        : s.active
+          ? `<span class="pill p-no_show">${s.days_left} day${s.days_left === 1 ? "" : "s"} left</span>`
+          : `<span class="pill p-archived">Served</span>`;
+      return `<tr>
+        <td data-l="Who"><b>${esc(name)}</b><div class="hint">${esc(s.email)} · ${esc(fmtPhone(s.phone))}</div></td>
+        <td data-l="Since">${esc(new Date(s.started_at).toLocaleDateString())}</td>
+        <td data-l="Until">${esc(until.toLocaleDateString())}</td>
+        <td data-l="Missed">${s.misses}</td>
+        <td data-l="Status">${status}${
+          s.lifted_at ? `<div class="hint">by ${esc(s.lifted_by || "a manager")}${
+            s.lifted_reason ? " — " + esc(s.lifted_reason) : ""}</div>` : ""}</td>
+        <td class="actions">${
+          s.active && r.can_lift
+            ? `<button class="btn ghost sm" data-lift="${s.id}" data-who="${esc(name)}">Reactivate now</button>`
+            : ""}</td></tr>`;
+    }).join("")
+      : `<tr><td colspan="6" data-l="" class="empty">${
+          $("suspPast").checked ? "Nobody has ever been suspended."
+                                : "Nobody is suspended right now."}</td></tr>`) +
+    `</tbody>`;
+
+  t.querySelectorAll("[data-lift]").forEach(b => b.onclick = async () => {
+    const why = prompt(
+      `Reactivate ${b.dataset.who} now?\n\n` +
+      `They'll be able to book and enter again straight away, and this pair of ` +
+      `missed pickups won't suspend them a second time.\n\n` +
+      `Why are you lifting it? (kept on the record)`, "");
+    if (why === null) return;
+    const m = $("suspMsg");
+    b.disabled = true;
+    try {
+      const res = await rpc("lift_suspension", { p_id: b.dataset.lift, p_reason: why });
+      m.className = "msg " + (res.ok ? "ok" : "err") + " show";
+      m.textContent = res.message || res.error;
+      if (res.ok) await loadSuspensions();
+    } catch (e) {
+      m.className = "msg err show"; m.textContent = "Could not lift it: " + e.message;
+    }
+    b.disabled = false;
+  });
+}
+
+$("suspPast").addEventListener("change", loadSuspensions);
+$("suspRefresh").onclick = loadSuspensions;
 
 // ── stores ────────────────────────────────────────────────────
 async function loadLocations() {
@@ -919,6 +1279,15 @@ async function loadLocations() {
     loadLocations();
   });
   fillSelect($("fLoc"), state.locations, "All locations");
+
+  // register store: remembered per device, since a till stays where it is
+  const active = state.locations.filter(l => l.active);
+  const saved = localStorage.getItem("drops_register_store");
+  $("regStore").innerHTML = `<option value="">— choose this store —</option>` +
+    active.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join("");
+  if (saved && active.some(l => l.id === saved)) $("regStore").value = saved;
+  $("regStore").onchange = () =>
+    localStorage.setItem("drops_register_store", $("regStore").value);
 }
 $("addLoc").onclick = async () => {
   const name = $("lName").value.trim();
@@ -1290,7 +1659,10 @@ $("saveRel").onclick = async () => {
             headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({ quantity_total: qty, size_order: order[size] ?? 0 }) });
         }
-      } else if (qty > 0) {
+      } else if (qty > 0 || rel.mode === "raffle") {
+        // A raffle needs its size rows to exist before any pairs are allocated:
+        // entrants pick a size while every quantity is still zero, and the
+        // allocation is only decided after entries close.
         inserts.push({ release_id: rel.id, location_id: lid, size,
           size_order: order[size] ?? 0, quantity_total: qty });
       }

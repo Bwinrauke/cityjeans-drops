@@ -141,6 +141,23 @@
   .row{display:grid; grid-template-columns:1fr 1fr; gap:10px}
   .fine{color:var(--muted); font-size:12px; margin:18px 0 0; line-height:1.5}
 
+  /* The rules are scrollable rather than collapsed: something you must agree to
+     should be on screen, not one tap away behind a "read more". */
+  .rules{background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius); margin:18px 0 0; overflow:hidden}
+  .rules h3{margin:0; padding:13px 15px; font-size:13px; letter-spacing:.06em;
+    text-transform:uppercase; background:var(--surface-2); color:var(--warn);
+    border-bottom:1px solid var(--line)}
+  .rules .body{max-height:190px; overflow-y:auto; -webkit-overflow-scrolling:touch;
+    padding:13px 15px; font-size:13px; line-height:1.65; color:var(--text);
+    white-space:pre-wrap}
+  .rules .body strong{color:var(--warn)}
+  .agree{display:flex; gap:11px; align-items:flex-start; padding:13px 15px;
+    border-top:1px solid var(--line); background:var(--surface-2);
+    cursor:pointer; font-size:13.5px; line-height:1.45}
+  .agree input{width:20px; height:20px; margin:1px 0 0; flex:0 0 auto;
+    accent-color:var(--ok); cursor:pointer}
+
   .recap{
     display:flex; gap:13px; align-items:center; background:var(--surface);
     border:1px solid var(--line); border-radius:var(--radius); padding:12px; margin:18px 0 4px;
@@ -290,19 +307,15 @@
              autocapitalize="off" spellcheck="false" enterkeyhint="next" placeholder="you@email.com">
       <label for="ph">Mobile number</label>
       <input id="ph" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="done" placeholder="(555) 123-4567">
+      <div id="rulesBox"></div>
       <div class="err" id="err"></div>
-      <p class="fine">One reservation per person per release. Bring your confirmation
-        code to the store during the pickup window — unclaimed pairs are released back to the floor.
-        <br><br>By reserving, you agree to receive email and text messages about this
-        reservation — your confirmation code, a pickup reminder, and a last call if
-        you haven't collected. Message and data rates may apply. Reply STOP to any
-        text to opt out.</p>
+      <p class="fine" id="fine"></p>
     </section>
 
     <!-- 4. confirmation -->
     <section class="screen" id="s-done">
       <div class="ticket" id="ticket"></div>
-      <div class="shot">📸 Screenshot this screen — show it to the cashier</div>
+      <div class="shot" id="shot">📸 Screenshot this screen — show it to the cashier</div>
       <div class="banner" id="banner"></div>
       <p class="link">Lost this? Look it up any time with your code and email.<br>
         <a id="startOver">Back to the release</a></p>
@@ -313,7 +326,7 @@
       <h2 style="margin-top:20px">Find your reservation</h2>
       <p class="sub">Enter the code from your confirmation and the email you used.</p>
       <label for="lcode">Confirmation code</label>
-      <input id="lcode" placeholder="CJ-XXXXXX" autocapitalize="characters" spellcheck="false">
+      <input id="lcode" placeholder="CJ-XXXXXX or RF-XXXXXX" autocapitalize="characters" spellcheck="false">
       <label for="lem">Email</label>
       <input id="lem" type="email" inputmode="email" autocapitalize="off" spellcheck="false">
       <div class="err" id="lerr"></div>
@@ -343,7 +356,8 @@
       body: JSON.stringify(body)
     }).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t))));
 
-  const S = { release:null, releases:[], locations:[], inv:[], size:null, loc:null, step:0 };
+  const S = { release:null, releases:[], locations:[], inv:[], size:null, loc:null, step:0,
+              rules:null };
   const money = n => n == null ? "" : "$" + Number(n).toFixed(Number(n) % 1 ? 2 : 0);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 
@@ -402,7 +416,11 @@
     } else if (id === "s-loc") {
       bar.style.display = "block"; cta.textContent = "Continue"; cta.disabled = !S.loc;
     } else if (id === "s-info") {
-      bar.style.display = "block"; cta.textContent = "Confirm reservation"; cta.disabled = false;
+      bar.style.display = "block";
+      cta.textContent = isRaffle() ? "Enter the raffle" : "Confirm reservation";
+      // a raffle entry waits on the rules being ticked
+      const agree = $("agree");
+      cta.disabled = isRaffle() && !!agree && !agree.checked;
     } else if (id === "s-lookup") {
       bar.style.display = "block"; cta.textContent = "Find it"; cta.disabled = false;
     } else bar.style.display = "none";
@@ -470,6 +488,9 @@
     // Load availability before showing the screen, so the size grid is never
     // briefly empty.
     try { await loadInventory(); } catch {}
+    // rules come from the database so they can be changed without a deploy,
+    // and so the entry can record which version was on screen
+    if (isRaffle() && !S.rules) { try { S.rules = await rpc("current_raffle_rules", {}); } catch {} }
     if (btn) { btn.style.opacity = ""; btn.style.pointerEvents = ""; }
     paintProduct();
     show("s-size", 0);
@@ -500,6 +521,7 @@
   }
 
   const SCALE_TAG = { mens:"US", womens:"US W", gs:"GS", ps:"PS", td:"TD", unisex:"US" };
+  const isRaffle = () => S.release && S.release.mode === "raffle";
   const SCALES = {
     mens:   "US Men's sizing",
     womens: "US Women's sizing",
@@ -513,12 +535,14 @@
     const list = sizeList();
     const total = list.reduce((a,s) => a + s.n, 0);
     const scale = SCALES[S.release.size_scale] || SCALES.mens;
-    $("sizeSub").textContent = scale +
-      (total ? "" : " · everything is currently reserved");
+    $("sizeSub").textContent = isRaffle()
+      ? scale + " · pick the size you want if you win"
+      : scale + (total ? "" : " · everything is currently reserved");
     // Customers never see how many are left — only whether a size can still be
     // reserved. Counts would tell people how the drop is allocated.
     $("sizes").innerHTML = list.map(s => {
-      const out = s.n === 0;
+      // In a raffle nothing is allocated yet, so every size can be entered.
+      const out = isRaffle() ? false : s.n === 0;
       return `<button class="size${out ? " out" : ""}${S.size===s.size?" sel":""}"
         ${out ? "disabled" : ""} data-size="${esc(s.size)}">${esc(s.size)}
         <small>${out ? "Gone" : "Available"}</small></button>`;
@@ -529,14 +553,19 @@
   }
 
   function paintLocs() {
-    const list = locsFor(S.size);
+    // a raffle lists every store, since none of them hold stock yet
+    const list = isRaffle()
+      ? S.locations.map(l => ({ ...l, n: 1 }))
+      : locsFor(S.size);
     const tag = SCALE_TAG[S.release.size_scale] || "US";
-    $("locSub").textContent = `${tag} ${S.size} · choose where to collect`;
+    $("locSub").textContent = isRaffle()
+      ? `${tag} ${S.size} · where you'd collect if you win`
+      : `${tag} ${S.size} · choose where to collect`;
     $("locs").innerHTML = list.map(l => `
       <button class="loc${S.loc===l.id?" sel":""}" data-id="${l.id}">
         <div><div class="nm">${esc(l.name)}</div>
         ${l.address ? `<div class="ad">${esc(l.address)}</div>` : ""}</div>
-        <div class="qty"><b>&check;</b>in stock</div>
+        <div class="qty">${isRaffle() ? "" : "<b>&check;</b>in stock"}</div>
       </button>`).join("");
     $("locs").querySelectorAll(".loc").forEach(b => b.onclick = () => {
       S.loc = b.dataset.id; paintLocs(); paintBar("s-loc");
@@ -549,35 +578,121 @@
       ${r.photo_url ? `<img src="${esc(r.photo_url)}" alt="">` : `<img alt="">`}
       <div><div class="t">${esc(r.name)}</div>
       <div class="s">${esc(SCALE_TAG[r.size_scale] || "US")} ${esc(S.size)} · ${esc(l ? l.name : "")}</div></div>`;
+    paintFine();
+    paintRules();
+  }
+
+  // Shown on the entry form, agreed to before entering, and the version is
+  // stored with the entry — so what someone agreed to can be quoted back later
+  // even after the rules change.
+  function paintRules() {
+    const box = $("rulesBox");
+    if (!isRaffle() || !S.rules || !S.rules.body) { box.innerHTML = ""; return; }
+    box.innerHTML = `
+      <div class="rules">
+        <h3>Raffle rules — read carefully</h3>
+        <div class="body">${esc(S.rules.body)}</div>
+        <label class="agree" for="agree">
+          <input type="checkbox" id="agree">
+          <span>I've read the raffle rules and I agree to them. I understand
+            entering more than once disqualifies every entry.</span>
+        </label>
+      </div>`;
+    $("agree").addEventListener("change", gateCta);
+    gateCta();
+  }
+
+  function gateCta() {
+    const a = $("agree");
+    if (!a) return;
+    $("cta").disabled = !a.checked;
+  }
+
+  // Both rules are told before they apply, not after. Someone who reads this
+  // and enters once is never disqualified, which is the point of saying it.
+  function paintFine() {
+    const consent =
+      `By ${isRaffle() ? "entering" : "reserving"}, you agree to receive email and ` +
+      `text messages about this ${isRaffle() ? "entry" : "reservation"}. Message and ` +
+      `data rates may apply. Reply STOP to any text to opt out.`;
+    $("fine").innerHTML = isRaffle()
+      // the rules above already cover one-entry-per-person and messaging, so this
+      // only adds what they don't say
+      ? `Two won or reserved pairs in a row that nobody collects pauses the account
+         for 90 days.<br><br>Message and data rates may apply. Reply STOP to any text
+         to opt out.`
+      : `<b>One reservation per person per release.</b> Bring your confirmation code to
+         the store during the pickup window — unclaimed pairs are released back to the
+         floor.<br><br>
+         Miss two pickups in a row and the account is paused for 90 days. If you can't
+         make it, reply to your confirmation email and we'll cancel it, no
+         penalty.<br><br>${consent}`;
   }
 
   function paintTicket(res) {
+    const entry = res.status === "entered" || /^RF-/i.test(res.code || "");
     const badge = res.status === "picked_up"
       ? '<span class="pill done">Picked up</span>'
+      : res.status === "entered" ? '<span class="pill ok">Entered</span>'
+      : res.status === "lost"    ? '<span class="pill dead">Not selected</span>'
+      : res.status === "disqualified" ? '<span class="pill dead">Disqualified</span>'
       : (res.status && !["confirmed", undefined].includes(res.status)
           ? `<span class="pill dead">${esc(res.status)}</span>`
           : '<span class="pill ok">Reserved</span>');
+
     $("ticket").innerHTML = `
-      <div class="lbl">Confirmation code</div>
+      <div class="lbl">${entry ? "Entry code" : "Confirmation code"}</div>
       <div class="code">${esc(res.code)}</div>
       <div id="qr"></div>
       ${badge}
       <div class="tdiv"></div>
       <div class="tshoe">${esc(res.release)}</div>
       <div class="trow"><span class="k">Size</span><span class="v">${esc(SCALE_TAG[res.size_scale] || "US")} ${esc(res.size)}</span></div>
-      <div class="trow"><span class="k">Pick up at</span><span class="v">${esc(res.location)}</span></div>
+      <div class="trow"><span class="k">${entry ? "Collect at if you win" : "Pick up at"}</span><span class="v">${esc(res.location)}</span></div>
       <div class="trow"><span class="k">Name</span><span class="v">${esc(res.first_name)} ${esc(res.last_name)}</span></div>
       ${res.retail_price != null ? `<div class="trow"><span class="k">Price</span><span class="v">${money(res.retail_price)}</span></div>` : ""}
+      ${entry && res.closes_at
+        ? `<div class="trow"><span class="k">Entries close</span><span class="v">${esc(when(res.closes_at))}</span></div>` : ""}
       ${when(res.pickup_starts_at, res.pickup_ends_at)
         ? `<div class="trow"><span class="k">Pickup window</span><span class="v">${esc(when(res.pickup_starts_at,res.pickup_ends_at))}</span></div>` : ""}`;
     try {
       new QRCode($("qr"), { text: res.code, width: 148, height: 148,
         colorDark:"#0a0a0a", colorLight:"#ffffff", correctLevel: QRCode.CorrectLevel.M });
     } catch (e) { $("qr").style.display = "none"; }
-    $("banner").innerHTML =
-      `<b>Bring this to the register.</b> Show the code or let the cashier scan it.
-       ${res.pickup_note ? "<br>" + esc(res.pickup_note) : ""}
-       <br><br>A confirmation email and text will also be on the way.`;
+
+    if (res.status === "lost") {
+      $("shot").style.display = "none";
+      $("banner").innerHTML =
+        `<b>You weren't drawn this time.</b> There were more entries than pairs, ` +
+        `and every entry had the same chance. Thanks for entering — the next drop is coming.`;
+    } else if (res.status === "disqualified") {
+      $("shot").style.display = "none";
+      $("banner").innerHTML =
+        `<b>These entries were disqualified.</b> More than one entry was made ` +
+        `under this name, email or phone, and the rule is one per person — so ` +
+        `all of them came out of the draw.<br><br>` +
+        `It's not a ban. Enter the next drop once and you're in like everyone else.`;
+    } else if (entry) {
+      $("shot").style.display = "";
+      $("shot").innerHTML = "🎟️ You're in — nothing else to do";
+      $("banner").innerHTML =
+        (res.duplicate
+          ? `<b>⚠️ You've entered this drop more than once.</b><br>` +
+            `${esc(res.duplicate_message || "")}<br><br>`
+          : "") +
+        `<b>We'll email you either way once the draw runs.</b> ` +
+        `You don't need to check back or keep this open.<br><br>` +
+        `Winners get a pickup code to bring to ${esc(res.location)}. ` +
+        `One entry per person — enter twice and every entry is disqualified.`;
+    } else {
+      $("shot").style.display = "";
+      $("shot").innerHTML = "📸 Screenshot this screen — show it to the cashier";
+      $("banner").innerHTML =
+        `<b>Bring this to the register.</b> Show the code or let the cashier scan it.` +
+        `${res.pickup_note ? "<br>" + esc(res.pickup_note) : ""}` +
+        `<br><br>Collect at <b>${esc(res.location)}</b> — a pair is held there and only there.` +
+        `<br><br>A confirmation email is on its way.`;
+    }
   }
 
   // ── actions ─────────────────────────────────────────────────
@@ -595,10 +710,12 @@
       const btn = $("cta"), e = $("lerr");
       e.classList.remove("show"); btn.disabled = true; btn.textContent = "Searching…";
       try {
-        const r = await rpc("lookup_reservation",
-          { p_code: $("lcode").value, p_email: $("lem").value });
+        const code = $("lcode").value.trim();
+        const r = /^RF-/i.test(code)
+          ? await rpc("lookup_entry",       { p_code: code, p_email: $("lem").value })
+          : await rpc("lookup_reservation", { p_code: code, p_email: $("lem").value });
         if (!r.ok) { e.textContent = r.message; e.classList.add("show"); }
-        else { paintTicket(r.reservation); btn.disabled = false; return show("s-done", 3); }
+        else { paintTicket(r.reservation || r.entry); btn.disabled = false; return show("s-done", 3); }
       } catch (err) { e.textContent = "Something went wrong. Try again."; e.classList.add("show"); }
       btn.disabled = false; btn.textContent = "Find it";
       return;
@@ -606,16 +723,32 @@
 
     if (cur === "s-info") {
       const btn = $("cta"), e = $("err");
-      e.classList.remove("show"); btn.disabled = true; btn.textContent = "Reserving…";
+      e.classList.remove("show"); btn.disabled = true;
+      btn.textContent = isRaffle() ? "Entering…" : "Reserving…";
       try {
-        const r = await rpc("reserve_spot", {
+        const args = {
           p_release_slug: S.release.slug, p_location_id: S.loc, p_size: S.size,
           p_first_name: $("fn").value, p_last_name: $("ln").value,
           p_email: $("em").value, p_phone: $("ph").value
-        });
-        if (r.ok) { paintTicket(r.reservation); btn.disabled = false; return show("s-done", 3); }
-        else if (r.error === "duplicate" && r.reservation) {
-          e.innerHTML = esc(r.message) + " Code <b>" + esc(r.reservation.code) + "</b>.";
+        };
+        if (isRaffle()) args.p_agree = !!($("agree") && $("agree").checked);
+        const r = await rpc(isRaffle() ? "enter_raffle" : "reserve_spot", args);
+        if (r.ok) {
+          const t = r.reservation || r.entry;
+          // the warning belongs to the submission, not to the entry row
+          if (r.duplicate) { t.duplicate = true; t.duplicate_message = r.duplicate_message; }
+          paintTicket(t);
+          btn.disabled = false; return show("s-done", 3);
+        }
+        else if (r.error === "suspended") {
+          // worth more than one red line: they need to know when it ends and
+          // that a manager can look at it
+          e.innerHTML = `<b>This account is paused.</b><br>${esc(r.message)}`;
+          e.classList.add("show");
+        }
+        else if (r.error === "duplicate" && (r.reservation || r.entry)) {
+          e.innerHTML = esc(r.message) + " Code <b>" +
+            esc((r.reservation || r.entry).code) + "</b>.";
           e.classList.add("show");
         } else if (r.error === "sold_out") {
           e.textContent = r.message; e.classList.add("show");
@@ -625,7 +758,8 @@
         e.textContent = "Network problem — check your connection and try again.";
         e.classList.add("show");
       }
-      btn.disabled = false; btn.textContent = "Confirm reservation";
+      btn.disabled = false;
+      btn.textContent = isRaffle() ? "Enter the raffle" : "Confirm reservation";
     }
   };
 
