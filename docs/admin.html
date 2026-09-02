@@ -590,7 +590,7 @@
 </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" integrity="sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx" crossorigin="anonymous"></script>
 <script src="config.js"></script>
 <script>
 (() => {
@@ -752,11 +752,13 @@ function releasePasswordLock() {
 
 // ── raffle ────────────────────────────────────────────────────
 async function loadRaffle() {
+  // Clear the banner before the await, not after: a slow reload landing after a
+  // draw finished would otherwise wipe the result the manager needs to read.
+  $("rafMsg").classList.remove("show");
   // Whether the draw is unlocked turns on the close time, so this tab always
   // re-reads the releases rather than trusting whatever was cached when the
   // panel was opened — a stale close time would hide the draw button.
   try { await loadReleases(); } catch {}
-  $("rafMsg").classList.remove("show");
   loadRules();
   const raffles = state.releases.filter(r => r.mode === "raffle");
   const keep = $("rafRel").value;
@@ -1315,7 +1317,7 @@ async function loadReleases() {
       return `<tr>
         <td data-l="Release"><span style="text-align:right"><b>${esc(r.name)}</b><br>
           <span class="hint">${esc(r.slug)}</span></span></td>
-        <td data-l="Status"><span class="pill p-${r.status}">${r.status}</span></td>
+        <td data-l="Status"><span class="pill p-${esc(r.status||"")}">${esc(r.status||"")}</span></td>
         <td data-l="Mode">${r.mode === "raffle" ? "Raffle" : "First come"}</td>
         <td data-l="Reserved"><b>${a.u}</b> <span class="hint">/ ${a.t}</span></td>
         <td class="actions"><button class="btn ghost sm" data-edit="${r.id}">Edit this release</button></td></tr>`;
@@ -1738,16 +1740,16 @@ function paintReservations() {
       <td data-l="Size"><b>${esc(r.size)}</b></td>
       <td data-l="Store">${esc(locName(r.location_id))}</td>
       <td data-l="Release">${esc(relName(r.release_id))}</td>
-      <td data-l="Status"><span class="pill p-${r.status}">${r.status.replace("_"," ")}</span></td>
+      <td data-l="Status"><span class="pill p-${esc(r.status||"")}">${esc((r.status||"").replace("_"," "))}</span></td>
       <td data-l="When" class="hint">${new Date(r.created_at).toLocaleDateString([], {month:"short",day:"numeric"})}
         ${new Date(r.created_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}</td>
-      <td class="actions"><select data-st="${r.id}" style="padding:6px 8px;font-size:12px">
+      <td class="actions">${canManage() ? `<select data-st="${r.id}" style="padding:6px 8px;font-size:12px">
         ${["confirmed","picked_up","no_show","cancelled"].map(s =>
-          `<option value="${s}"${s===r.status?" selected":""}>${s.replace("_"," ")}</option>`).join("")}
-      </select>
+          `<option value="${esc(s)}"${s===r.status?" selected":""}>${s.replace("_"," ")}</option>`).join("")}
+      </select>` : `<span class="pill p-${esc(r.status||"")}">${esc((r.status||"").replace("_"," "))}</span>`}
       ${canManage() ? (r.archived_at
         ? `<button class="btn ghost sm" data-unarch="${r.id}">Restore</button>`
-        : `<button class="btn ghost sm" data-arch="${r.id}" data-status="${r.status}">Archive</button>`) : ""}
+        : `<button class="btn ghost sm" data-arch="${r.id}" data-status="${esc(r.status||"")}">Archive</button>`) : ""}
       </td></tr>`).join("")
       : `<tr><td colspan="8" data-l="" class="empty">Nothing here yet.</td></tr>`) + `</tbody>`;
 
@@ -1826,7 +1828,15 @@ $("csv").onclick = () => {
   const relName = id => (state.releases.find(r => r.id === id) || {}).name || "";
   const locName = id => (state.locations.find(l => l.id === id) || {}).name || "";
   const head = ["Code","First","Last","Email","Phone","Size","Store","Release","Status","Reserved at","Picked up at"];
-  const q = s => `"${String(s ?? "").replace(/"/g,'""')}"`;
+  // A customer picks their own name, so a name that starts with = + - @ (or a
+  // tab/CR) is a live formula the moment this file is opened in Excel — one that
+  // can exfiltrate the whole sheet. Prefix those with a quote so the cell reads
+  // as text, then CSV-quote as usual.
+  const q = s => {
+    let v = String(s ?? "");
+    if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    return `"${v.replace(/"/g,'""')}"`;
+  };
   const csv = [head.join(",")].concat(state.reservations.map(r => [
     r.code, r.first_name, r.last_name, r.email, r.phone, r.size,
     locName(r.location_id), relName(r.release_id), r.status,

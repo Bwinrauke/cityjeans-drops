@@ -151,7 +151,8 @@
   .rules .body{max-height:190px; overflow-y:auto; -webkit-overflow-scrolling:touch;
     padding:13px 15px; font-size:13px; line-height:1.65; color:var(--text);
     white-space:pre-wrap}
-  .rules .body strong{color:var(--warn)}
+  .rules .body .imp{display:block; color:var(--warn); font-weight:800;
+    margin:-2px 0 10px; padding-bottom:10px; border-bottom:1px solid var(--line)}
   .agree{display:flex; gap:11px; align-items:flex-start; padding:13px 15px;
     border-top:1px solid var(--line); background:var(--surface-2);
     cursor:pointer; font-size:13.5px; line-height:1.45}
@@ -342,7 +343,7 @@
 </div>
 
 <script src="config.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
 <script>
 (() => {
   const CFG = window.DROPS_CONFIG;
@@ -591,7 +592,13 @@
     box.innerHTML = `
       <div class="rules">
         <h3>Raffle rules — read carefully</h3>
-        <div class="body">${esc(S.rules.body)}</div>
+        <div class="body">${
+          // a line the store marks IMPORTANT is lifted out of the numbered list,
+          // because a change to how people are used to being told is the thing
+          // most likely to be read past
+          esc(S.rules.body).split("\n").map(l =>
+            /^\s*important\b/i.test(l) ? `<b class="imp">${l}</b>` : l).join("\n")
+        }</div>
         <label class="agree" for="agree">
           <input type="checkbox" id="agree">
           <span>I've read the raffle rules and I agree to them. I understand
@@ -680,7 +687,9 @@
           ? `<b>⚠️ You've entered this drop more than once.</b><br>` +
             `${esc(res.duplicate_message || "")}<br><br>`
           : "") +
-        `<b>We'll email you either way once the draw runs.</b> ` +
+        `<b>Results come by email — not text.</b> This is a new system; ` +
+        `we email everyone once the draw runs, win or lose. Check your spam ` +
+        `folder if you don't see it.<br><br>` +
         `You don't need to check back or keep this open.<br><br>` +
         `Winners get a pickup code to bring to ${esc(res.location)}. ` +
         `One entry per person — enter twice and every entry is disqualified.`;
