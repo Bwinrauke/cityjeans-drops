@@ -5,7 +5,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const DIR = require('path').join(__dirname, '..', 'docs');
+const DIR = __dirname;
 const UP = 'nrncccfqgwxcugqdouvs.supabase.co';
 const PORT = 8900;
 
@@ -43,8 +43,12 @@ http.createServer((req, res) => {
       out = Buffer.from(data.toString()
         // point the app at this proxy instead of Supabase directly
         .replace(/SUPABASE_URL: "[^"]*"/, 'SUPABASE_URL: "http://localhost:' + PORT + '"')
-        // serve the QR library locally (the CDN is unreachable from this sandbox)
-        .replace(/<script src="https:\/\/cdnjs[^"]*"><\/script>/, '<script src="/qrcode.min.js"></script>')
+        // serve the QR libraries locally (the CDN is unreachable from this
+        // sandbox). Match the whole tag including any integrity/crossorigin
+        // attributes, and keep the local copies byte-identical to the CDN so the
+        // SRI hash on the real tag still validates in production.
+        .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/jsqr@[^"]*"[^>]*><\/script>/, '<script src="/jsQR.js"></script>')
+        .replace(/<script src="https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/qrcodejs[^"]*"[^>]*><\/script>/, '<script src="/qrcode.min.js"></script>')
         // drop the web-font link so the test does not wait on it
         .replace(/<link href="https:\/\/fonts\.googleapis[^"]*"[^>]*>/, ''));
     }

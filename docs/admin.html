@@ -76,6 +76,10 @@
   .p-draft{background:#333; color:#bbb}
   .p-closed{background:#4a3b1a; color:var(--warn)}
   .p-archived{background:#2a2a2a; color:#777}
+  .relstate{display:inline-block; padding:2px 8px; border-radius:99px; font-size:9px;
+    font-weight:800; letter-spacing:.06em; text-transform:uppercase; vertical-align:middle}
+  .relstate.shut{background:#3a1e1e; color:#ff9c9c}
+  .relstate.ended{background:#2a2a2a; color:#999}
   .p-confirmed{background:#1e3a8a33; color:#93b4ff; border:1px solid #2c4fa0}
   .p-picked_up{background:var(--ok); color:#0a0a0a}
   .p-cancelled,.p-no_show{background:#3a1e1e; color:#ff9c9c}
@@ -378,7 +382,9 @@
     <div class="rowbtns" style="margin-bottom:14px">
       <button class="btn sm" id="newRel">+ New release</button>
       <button class="btn ghost sm" id="refreshRel">Refresh</button>
+      <label class="chk"><input type="checkbox" id="showArchRel"> Show archived</label>
     </div>
+    <div class="msg" id="relMsg"></div>
     <div class="card scroll"><table id="relTable" class="stacked"></table></div>
   </section>
 
@@ -1302,7 +1308,27 @@ $("addLoc").onclick = async () => {
 };
 
 // ── releases list ─────────────────────────────────────────────
+// A small badge that reads the timing, not the status field: an "open" release
+// whose closes_at has passed is really shut to customers, and a drop sits in a
+// 24-hour "pickup ended" grace before it is truly over. Mirrors the same states
+// the customer app shows, so staff and customers see the drop the same way.
+function relWindowBadge(r) {
+  const now = Date.now(), t = v => v ? new Date(v).getTime() : null;
+  const closes = t(r.closes_at), pEnd = t(r.pickup_ends_at);
+  if (r.status === "archived") return "";
+  if (pEnd && now > pEnd) {
+    return now < pEnd + 24 * 3600000
+      ? ` <span class="relstate ended">pickup ended</span>` : "";
+  }
+  if ((closes && now > closes) || r.status === "closed")
+    return ` <span class="relstate shut">${r.mode === "raffle" ? "entries closed" : "reservations closed"}</span>`;
+  return "";
+}
+
 async function loadReleases() {
+  // "Archived" is a status, so an archived drop is just one with that status.
+  // Keep them out of the list unless the box is ticked — a season of past drops
+  // shouldn't bury the two you're running now.
   state.releases = await rest("releases?select=*&order=created_at.desc");
   const inv = await rest("release_inventory?select=release_id,quantity_total,quantity_reserved");
   const agg = {};
@@ -1310,20 +1336,63 @@ async function loadReleases() {
     const a = agg[r.release_id] || (agg[r.release_id] = { t:0, u:0 });
     a.t += r.quantity_total; a.u += r.quantity_reserved;
   });
+  const showArch = $("showArchRel") && $("showArchRel").checked;
+  const shown = state.releases.filter(r => showArch || r.status !== "archived");
+  const hiddenArch = state.releases.filter(r => r.status === "archived").length;
+
   $("relTable").innerHTML = `<thead><tr><th>Release</th><th>Status</th><th>Mode</th>
       <th>Reserved</th><th></th></tr></thead><tbody>` +
-    (state.releases.length ? state.releases.map(r => {
+    (shown.length ? shown.map(r => {
       const a = agg[r.id] || { t:0, u:0 };
-      return `<tr>
+      const archived = r.status === "archived";
+      return `<tr class="${archived ? "arch" : ""}">
         <td data-l="Release"><span style="text-align:right"><b>${esc(r.name)}</b><br>
           <span class="hint">${esc(r.slug)}</span></span></td>
-        <td data-l="Status"><span class="pill p-${esc(r.status||"")}">${esc(r.status||"")}</span></td>
+        <td data-l="Status"><span class="pill p-${esc(r.status||"")}">${esc(r.status||"")}</span>${relWindowBadge(r)}</td>
         <td data-l="Mode">${r.mode === "raffle" ? "Raffle" : "First come"}</td>
         <td data-l="Reserved"><b>${a.u}</b> <span class="hint">/ ${a.t}</span></td>
-        <td class="actions"><button class="btn ghost sm" data-edit="${r.id}">Edit this release</button></td></tr>`;
-    }).join("") : `<tr><td colspan="5" data-l="" class="empty">No releases yet.</td></tr>`) + `</tbody>`;
+        <td class="actions">
+          <button class="btn ghost sm" data-edit="${r.id}">Edit</button>
+          ${archived
+            ? `<button class="btn ghost sm" data-relstatus="${r.id}" data-to="closed">Restore</button>`
+            : `<button class="btn ghost sm" data-relstatus="${r.id}" data-to="archived">Archive</button>`}
+        </td></tr>`;
+    }).join("")
+      : `<tr><td colspan="5" data-l="" class="empty">${
+          hiddenArch ? "No active releases. Tick “Show archived” to see past ones."
+                     : "No releases yet."}</td></tr>`) +
+    (!showArch && hiddenArch
+      ? `<tr><td colspan="5" data-l="" class="hint" style="text-align:center">
+           ${hiddenArch} archived — tick “Show archived” above to see them.</td></tr>`
+      : "") + `</tbody>`;
+
   $("relTable").querySelectorAll("[data-edit]").forEach(b =>
     b.onclick = () => editRelease(state.releases.find(r => r.id === b.dataset.edit)));
+
+  $("relTable").querySelectorAll("[data-relstatus]").forEach(b => b.onclick = async () => {
+    const rel = state.releases.find(r => r.id === b.dataset.relstatus);
+    const to = b.dataset.to;
+    const m = $("relMsg");
+    if (to === "archived" &&
+        !confirm(`Archive “${rel.name}”?\n\nIt disappears from the customer app and ` +
+                 `from this list. Reservations already made are kept. You can restore ` +
+                 `it any time from “Show archived”.`)) return;
+    b.disabled = true;
+    try {
+      await rest("releases?id=eq." + rel.id, { method:"PATCH",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ status: to }) });
+      m.className = "msg ok show";
+      m.textContent = to === "archived"
+        ? `“${rel.name}” archived — customers no longer see it.`
+        : `“${rel.name}” restored as closed. Open it in the editor to reopen entries.`;
+      await loadReleases();
+    } catch (e) {
+      m.className = "msg err show"; m.textContent = "Could not update it: " + e.message;
+      b.disabled = false;
+    }
+  });
+
   fillSelect($("fRel"), state.releases, "All releases");
 }
 function fillSelect(sel, items, allLabel) {
@@ -1712,6 +1781,7 @@ async function loadReservations() {
 $("fQ").addEventListener("input", paintReservations);
 $("refreshRes").onclick = loadReservations;
 $("refreshRel").onclick = loadReleases;
+$("showArchRel").addEventListener("change", loadReleases);
 
 function paintReservations() {
   const q = $("fQ").value.trim().toLowerCase();

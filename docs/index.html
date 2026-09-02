@@ -230,6 +230,20 @@
   .pill.dead{background:#ddd; color:#666}
 
   .center{text-align:center; padding:70px 20px; color:var(--muted)}
+  .statebox{background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius); padding:20px 18px; margin:16px 0 4px; text-align:center}
+  .statebox .tag{display:inline-block; padding:5px 12px; border-radius:99px;
+    font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+    margin-bottom:12px}
+  .statebox .tag.shut{background:#3a1e1e; color:#ff9c9c; border:1px solid #6b2c2c}
+  .statebox .tag.ended{background:#2a2a2a; color:#bbb; border:1px solid var(--line)}
+  .statebox h3{margin:0 0 8px; font-size:19px; color:var(--text)}
+  .statebox p{margin:0; font-size:14px; line-height:1.5}
+  /* a small inline banner for the admin/list context reuse */
+  .relstate{display:inline-block; padding:3px 9px; border-radius:99px; font-size:10px;
+    font-weight:800; letter-spacing:.06em; text-transform:uppercase; margin-left:6px}
+  .relstate.shut{background:#3a1e1e; color:#ff9c9c}
+  .relstate.ended{background:#2a2a2a; color:#999}
   .center h3{color:var(--text); font-size:19px; margin:0 0 8px}
   .spin{
     width:26px; height:26px; border:2.5px solid var(--line); border-top-color:var(--accent);
@@ -262,6 +276,14 @@
         <h3>No live release right now</h3>
         <p>Follow us to find out when the next drop opens for reservations.</p>
       </div>
+    </section>
+
+    <!-- window closed (entries/reservations over, or pickup ended) -->
+    <section class="screen" id="s-closed">
+      <div id="closedHero" class="hero" style="margin-top:20px"></div>
+      <div class="statebox" id="closedBox"></div>
+      <button class="btn" id="closedLookup" style="margin-top:6px">Look up my code</button>
+      <button class="btn ghost" id="closedOther" style="margin-top:10px; display:none">See other drops</button>
     </section>
 
     <!-- 0. all open releases -->
@@ -463,7 +485,12 @@
     $("rels").innerHTML = S.releases.map((r, i) => {
       const scale = SCALE_SHORT[r.size_scale] || SCALE_SHORT.mens;
       const pu = when(r.pickup_starts_at, r.pickup_ends_at);
-      return `<button class="rel${r.available ? "" : " out"}" data-i="${i}">
+      const st = releaseState(r);
+      const stTag = st === "closed_entry"
+          ? `<span class="tagp gone">${r.mode === "raffle" ? "Entries closed" : "Reservations closed"}</span>`
+        : st === "pickup_ended" ? `<span class="tagp gone">Pickup ended</span>`
+        : "";
+      return `<button class="rel${r.available && st === "open" ? "" : " out"}" data-i="${i}">
         ${r.photo_url ? `<img src="${esc(r.photo_url)}" alt="">` : `<span class="ph">👟</span>`}
         <div class="body">
           <div class="nm">${esc(r.name)}</div>
@@ -471,7 +498,7 @@
           <div class="row">
             <span class="tagp">${esc(scale)}</span>
             ${r.retail_price != null ? `<span class="tagp price">${money(r.retail_price)}</span>` : ""}
-            ${r.available ? "" : `<span class="tagp gone">Fully reserved</span>`}
+            ${stTag || (r.available ? "" : `<span class="tagp gone">Fully reserved</span>`)}
           </div>
         </div>
         <span class="go">›</span>
@@ -493,8 +520,62 @@
     // and so the entry can record which version was on screen
     if (isRaffle() && !S.rules) { try { S.rules = await rpc("current_raffle_rules", {}); } catch {} }
     if (btn) { btn.style.opacity = ""; btn.style.pointerEvents = ""; }
+
+    // Where is this drop in its own timeline? The funnel only makes sense while
+    // it is still taking entries; past that the customer sees why, not a form
+    // that would be refused anyway.
+    const st = releaseState(rel);
+    if (st !== "open") { paintClosed(st); return show("s-closed", 0); }
+
     paintProduct();
     show("s-size", 0);
+  }
+
+  // opens_at → closes_at (entries/reservations close) → pickup_starts_at →
+  // pickup_ends_at → +24h ("pickup ended" grace). Returns one of:
+  // "open" | "closed_entry" | "pickup_ended" | "over"
+  function releaseState(r) {
+    const now = Date.now();
+    const t = v => v ? new Date(v).getTime() : null;
+    const closes = t(r.closes_at), pEnd = t(r.pickup_ends_at);
+    if (r.status === "archived") return "over";
+    if (pEnd && now > pEnd) return now < pEnd + 24 * 3600 * 1000 ? "pickup_ended" : "over";
+    if (closes && now > closes) return "closed_entry";
+    if (r.status === "closed") return "closed_entry";
+    return "open";
+  }
+
+  function paintClosed(st) {
+    const r = S.release, raffle = isRaffle();
+    $("closedHero").innerHTML = r.photo_url
+      ? `<img src="${esc(r.photo_url)}" alt="${esc(r.name)}">`
+      : `<span class="ph">👟</span>`;
+
+    let tagCls, tag, head, body;
+    if (st === "pickup_ended") {
+      tagCls = "ended"; tag = "Pickup ended";
+      head = "Pickup has ended";
+      body = `The pickup window for <b>${esc(r.name)}</b> has closed. Uncollected pairs ` +
+             `have gone back on the floor. If you picked yours up, you're all set.`;
+    } else if (st === "over") {
+      tagCls = "ended"; tag = "Closed";
+      head = "This drop has ended";
+      body = `<b>${esc(r.name)}</b> is no longer available here.`;
+    } else { // closed_entry
+      tagCls = "shut";
+      tag = raffle ? "Entries closed" : "Reservations closed";
+      head = raffle ? "Entries are closed" : "Reservations are closed";
+      body = raffle
+        ? `The raffle window for <b>${esc(r.name)}</b> has ended. Winners are drawn ` +
+          `and <b>emailed</b> — not texted. Check your email (and spam). You can look ` +
+          `up your entry below.`
+        : `The reservation window for <b>${esc(r.name)}</b> has ended. If you already ` +
+          `reserved, look up your code below to see your pickup details.`;
+    }
+
+    $("closedBox").innerHTML =
+      `<span class="tag ${tagCls}">${tag}</span><h3>${head}</h3><p>${body}</p>`;
+    $("closedOther").style.display = S.releases.length > 1 ? "" : "none";
   }
 
   function paintProduct() {
@@ -708,6 +789,8 @@
   $("cta2").onclick = () => { $("lerr").classList.remove("show"); show("s-lookup", 0); };
   $("startOver").onclick = () => location.reload();
   $("listLookup").onclick = () => { $("lerr").classList.remove("show"); show("s-lookup", 0); };
+  $("closedLookup").onclick = () => { $("lerr").classList.remove("show"); show("s-lookup", 0); };
+  $("closedOther").onclick = () => { paintReleases(); show("s-list", 0); };
 
   $("cta").onclick = async () => {
     const cur = document.querySelector(".screen.active").id;
