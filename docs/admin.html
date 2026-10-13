@@ -108,6 +108,7 @@
   .btn.sm{padding:8px 13px; font-size:13px; border-radius:9px}
   .btn.danger{background:transparent; color:var(--bad); border:1.5px solid rgba(255,92,92,.35)}
   .rowbtns{display:flex; gap:9px; flex-wrap:wrap; align-items:center}
+  .rowbtns .sheetsel{width:auto; min-width:150px; padding:7px 10px; font-size:13px}
 
   table{width:100%; border-collapse:collapse; font-size:14px}
   th{text-align:left; color:var(--muted); font-size:11px; font-weight:700;
@@ -456,7 +457,9 @@
     <div class="rowbtns" style="margin-bottom:14px">
       <button class="btn ghost sm" id="refreshRes">Refresh</button>
       <button class="btn ghost sm manager-only" id="csv">Export CSV</button>
+      <select id="sheetStore" class="sheetsel" aria-label="Store for the pickup sheets"></select>
       <button class="btn ghost sm" id="printSheets">Print store sheets</button>
+      <button class="btn ghost sm" id="pdfSheets">Download PDF</button>
       <label class="chk manager-only"><input type="checkbox" id="showArch"> Show archived</label>
       <button class="btn ghost sm manager-only" id="archBulk">Archive these…</button>
       <span class="hint" id="rcount"></span>
@@ -1399,6 +1402,7 @@ async function loadLocations() {
     loadLocations();
   });
   fillSelect($("fLoc"), state.locations, "All locations");
+  fillSelect($("sheetStore"), state.locations, "Sheets: all stores");
 
   // register store: remembered per device, since a till stays where it is
   const active = state.locations.filter(l => l.active);
@@ -2023,31 +2027,30 @@ const bySize = (a, b) => {
   return x[0] - y[0] || x[1] - y[1] || String(x[2]).localeCompare(String(y[2]));
 };
 
-function buildStoreSheets() {
+// The sheets cover whatever the filters show, narrowed to the store picked
+// beside the buttons (or every store, one page each).
+const SHEET_STATUS = { confirmed: "To collect", picked_up: "Picked up",
+                       cancelled: "Cancelled", no_show: "No show" };
+
+function storeSheetData() {
   const relName = id => (state.releases.find(r => r.id === id) || {}).name || "—";
   const locName = id => (state.locations.find(l => l.id === id) || {}).name || "—";
 
   // same rows the table is showing: server filters plus the search box
   const q = $("fQ").value.trim().toLowerCase();
-  const rows = state.reservations.filter(r => !q ||
-    [r.code, r.first_name, r.last_name, r.email, r.phone, r.phone_norm]
-      .join(" ").toLowerCase().includes(q));
+  const only = $("sheetStore").value;
+  const rows = state.reservations.filter(r =>
+    (!only || r.location_id === only) &&
+    (!q || [r.code, r.first_name, r.last_name, r.email, r.phone, r.phone_norm]
+      .join(" ").toLowerCase().includes(q)));
 
-  if (!rows.length) return { html: "", count: 0, stores: 0 };
-
-  // group by store, then by release inside it
+  // group by store
   const byStore = new Map();
   rows.forEach(r => {
     const k = r.location_id || "none";
     if (!byStore.has(k)) byStore.set(k, []);
     byStore.get(k).push(r);
   });
-
-  const printed = new Date().toLocaleString([], {
-    weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit" });
-  const statusLabel = { confirmed: "To collect", picked_up: "Picked up",
-                        cancelled: "Cancelled", no_show: "No show" };
 
   const order = state.locations.map(l => l.id);
   const stores = [...byStore.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b));
@@ -2057,70 +2060,208 @@ function buildStoreSheets() {
       bySize(a.size, b.size) ||
       String(a.last_name || "").localeCompare(String(b.last_name || "")) ||
       String(a.first_name || "").localeCompare(String(b.first_name || "")));
-
-    const releases = [...new Set(list.map(r => relName(r.release_id)))];
     const toCollect = list.filter(r => r.status === "confirmed");
-
     // pull sheet: how many pairs of each size this store needs on the shelf
     const counts = new Map();
     toCollect.forEach(r => counts.set(r.size, (counts.get(r.size) || 0) + 1));
-    const sizes = [...counts.keys()].sort(bySize);
+    return {
+      store: locName(locId),
+      releases: [...new Set(list.map(r => relName(r.release_id)))],
+      list, toCollect, counts,
+      sizes: [...counts.keys()].sort(bySize),
+    };
+  });
 
-    const pull = sizes.length
+  const printed = new Date().toLocaleString([], {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit" });
+  return { sheets, count: rows.length, printed };
+}
+
+const SHEET_FOOT = "Check the code against the customer's screenshot before handing " +
+  "a pair over. A code held at another store will be refused at the register. " +
+  "Send them to the store named on their confirmation.";
+const sheetMeta = (sh, printed) =>
+  `${sh.toCollect.length} to collect` +
+  (sh.list.length !== sh.toCollect.length
+    ? ` · ${sh.list.length - sh.toCollect.length} already settled` : "") +
+  ` · printed ${printed}`;
+const custName = r => [r.first_name, r.last_name].filter(Boolean).join(" ");
+
+function buildStoreSheets() {
+  const d = storeSheetData();
+  if (!d.count) return { html: "", count: 0, stores: 0 };
+
+  const html = d.sheets.map(sh => {
+    const pull = sh.sizes.length
       ? `<table class="pull"><thead><tr><th>Size</th><th>Pairs to pull</th></tr></thead><tbody>
-           ${sizes.map(sz => `<tr><td>${esc(sz)}</td><td class="n">${counts.get(sz)}</td></tr>`).join("")}
-           <tr class="tot"><td>Total</td><td class="n">${toCollect.length}</td></tr>
+           ${sh.sizes.map(sz => `<tr><td>${esc(sz)}</td><td class="n">${sh.counts.get(sz)}</td></tr>`).join("")}
+           <tr class="tot"><td>Total</td><td class="n">${sh.toCollect.length}</td></tr>
          </tbody></table>`
       : `<p class="none">Nothing left to pull for this store.</p>`;
 
-    const pickup = list.length
-      ? `<table><thead><tr>
+    const pickup = `<table><thead><tr>
            <th class="tick"></th><th>Size</th><th>Code</th><th>Customer</th>
            <th>Phone</th><th>Status</th></tr></thead><tbody>
-           ${list.map(r => `<tr>
+           ${sh.list.map(r => `<tr>
              <td class="tick"><span class="box"></span></td>
              <td><b>${esc(r.size)}</b></td>
              <td class="code">${esc(r.code)}</td>
-             <td>${esc([r.first_name, r.last_name].filter(Boolean).join(" "))}</td>
+             <td>${esc(custName(r))}</td>
              <td>${esc(fmtPhone(r.phone))}</td>
-             <td class="st">${esc(statusLabel[r.status] || r.status || "")}</td>
+             <td class="st">${esc(SHEET_STATUS[r.status] || r.status || "")}</td>
            </tr>`).join("")}
-         </tbody></table>`
-      : `<p class="none">No reservations for this store.</p>`;
+         </tbody></table>`;
 
     return `<section class="sheet">
-      <h1>${esc(locName(locId))} — pickup sheet</h1>
-      <p class="meta">${esc(releases.join(" · "))}<br>
-        ${toCollect.length} to collect${
-          list.length !== toCollect.length
-            ? ` · ${list.length - toCollect.length} already settled` : ""
-        } · printed ${esc(printed)}</p>
+      <h1>${esc(sh.store)} — pickup sheet</h1>
+      <p class="meta">${esc(sh.releases.join(" · "))}<br>${esc(sheetMeta(sh, d.printed))}</p>
       <h2>Pull sheet</h2>${pull}
       <h2>Pickup list</h2>${pickup}
-      <p class="foot">Check the code against the customer's screenshot before handing
-        a pair over. A code held at another store will be refused at the register —
-        send them to the store named on their confirmation.</p>
+      <p class="foot">${esc(SHEET_FOOT)}</p>
     </section>`;
   }).join("");
 
-  return { html: sheets, count: rows.length, stores: stores.length };
+  return { html, count: d.count, stores: d.sheets.length };
 }
+
+const sheetsSummary = out =>
+  `${out.count} reservation${out.count === 1 ? "" : "s"} across ` +
+  `${out.stores} store${out.stores === 1 ? "" : "s"}, one page each`;
 
 $("printSheets").onclick = () => {
   const m = $("archmsg");
   const out = buildStoreSheets();
   if (!out.count) {
     m.className = "msg err show";
-    m.textContent = "Nothing to print — no reservations match the current filters.";
+    m.textContent = "Nothing to print. No reservations match the current filters and store.";
     return;
   }
   $("printRoot").innerHTML = out.html;
   m.className = "msg ok show";
-  m.textContent = `Printing ${out.count} reservation${out.count === 1 ? "" : "s"} across ` +
-    `${out.stores} store${out.stores === 1 ? "" : "s"} — one page each. ` +
-    `Choose "Save as PDF" in the print dialog to send it on.`;
+  m.textContent = `Printing ${sheetsSummary(out)}.`;
   // let the browser paint the sheets before the dialog takes over
   setTimeout(() => window.print(), 60);
+};
+
+// jsPDF only loads when someone asks for a PDF, so the register stays light.
+// Pinned with SRI like the QR library above.
+let pdfLibs = null;
+const loadScript = (src, integrity) => new Promise((ok, fail) => {
+  const s = document.createElement("script");
+  s.src = src; s.integrity = integrity; s.crossOrigin = "anonymous";
+  s.onload = ok; s.onerror = () => fail(new Error("could not load " + src));
+  document.head.appendChild(s);
+});
+const loadPdfLibs = () => pdfLibs || (pdfLibs = (async () => {
+  await loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+    "sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk");
+  await loadScript("https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js",
+    "sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3");
+  return window.jspdf.jsPDF;
+})().catch(e => { pdfLibs = null; throw e; }));
+
+function storeSheetsPdf(jsPDF, d) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const W = doc.internal.pageSize.getWidth(), M = 40;
+  // jsPDF's built-in fonts are Latin-1 only
+  const t = v => String(v ?? "").replace(/[—–]/g, "-").replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"').replace(/·/g, "|").replace(/[^\x00-\xff]/g, "");
+  const head = { fillColor: [255, 255, 255], textColor: [70, 70, 70], fontStyle: "bold",
+    fontSize: 8, lineWidth: { bottom: 0.8 }, lineColor: [150, 150, 150] };
+  const section = (label, y) => {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(0);
+    doc.text(label.toUpperCase(), M, y);
+    doc.setLineWidth(1.2); doc.line(M, y + 4, W - M, y + 4);
+    return y + 12;
+  };
+
+  d.sheets.forEach((sh, i) => {
+    if (i) doc.addPage();
+    doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.setTextColor(0);
+    doc.text(t(sh.store + " - pickup sheet"), M, M + 10);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(60);
+    const meta = doc.splitTextToSize(t(sh.releases.join(" | ")), W - 2 * M);
+    doc.text(meta, M, M + 28);
+    let y = M + 28 + meta.length * 12;
+    doc.text(t(sheetMeta(sh, d.printed)), M, y);
+    y = section("Pull sheet", y + 24);
+
+    if (sh.sizes.length) {
+      doc.autoTable({
+        startY: y, margin: { left: M, right: M }, tableWidth: 220, theme: "plain",
+        head: [["Size", { content: "Pairs to pull", styles: { halign: "right" } }]],
+        body: sh.sizes.map(sz => [t(sz), String(sh.counts.get(sz))]),
+        foot: [["Total", { content: String(sh.toCollect.length), styles: { halign: "right" } }]],
+        headStyles: head,
+        bodyStyles: { fontSize: 12, fontStyle: "bold", textColor: 0 },
+        footStyles: { fontSize: 12, fontStyle: "bold", textColor: 0,
+          lineWidth: { top: 1.5 }, lineColor: 0 },
+        columnStyles: { 1: { halign: "right" } },
+      });
+      y = doc.lastAutoTable.finalY;
+    } else {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(10); doc.setTextColor(90);
+      doc.text("Nothing left to pull for this store.", M, y + 14);
+      y += 22;
+    }
+
+    y = section("Pickup list", y + 26);
+    doc.autoTable({
+      startY: y, margin: { left: M, right: M, bottom: 60 }, theme: "plain",
+      head: [["", "Size", "Code", "Customer", "Phone", "Status"]],
+      body: sh.list.map(r => ["", t(r.size), t(r.code), t(custName(r)),
+        t(fmtPhone(r.phone)), t(SHEET_STATUS[r.status] || r.status || "")]),
+      headStyles: head,
+      bodyStyles: { fontSize: 10, textColor: 0, lineWidth: { bottom: 0.4 },
+        lineColor: [210, 210, 210], cellPadding: { top: 6, bottom: 6, left: 4, right: 4 } },
+      columnStyles: { 0: { cellWidth: 22 }, 1: { fontStyle: "bold", cellWidth: 44 },
+        2: { fontStyle: "bold", cellWidth: 80 }, 5: { fontSize: 8, textColor: [80, 80, 80] } },
+      // an empty tick box in the first column
+      didDrawCell: c => {
+        if (c.section === "body" && c.column.index === 0) {
+          doc.setLineWidth(1); doc.setDrawColor(0);
+          doc.rect(c.cell.x + 5, c.cell.y + (c.cell.height - 10) / 2, 10, 10);
+        }
+      },
+    });
+
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(90);
+    const foot = doc.splitTextToSize(t(SHEET_FOOT), W - 2 * M);
+    let fy = doc.lastAutoTable.finalY + 22;
+    if (fy + foot.length * 10 > doc.internal.pageSize.getHeight() - M) { doc.addPage(); fy = M; }
+    doc.text(foot, M, fy);
+  });
+  return doc;
+}
+
+$("pdfSheets").onclick = async () => {
+  const m = $("archmsg"), btn = $("pdfSheets");
+  const d = storeSheetData();
+  if (!d.count) {
+    m.className = "msg err show";
+    m.textContent = "Nothing to download. No reservations match the current filters and store.";
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const jsPDF = await loadPdfLibs();
+    const doc = storeSheetsPdf(jsPDF, d);
+    const slug = v => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const rel = state.releases.find(r => r.id === $("fRel").value);
+    const name = ["pickup-sheets",
+      d.sheets.length === 1 ? slug(d.sheets[0].store) : "all-stores",
+      rel ? slug(rel.slug || rel.name) : "",
+      new Date().toISOString().slice(0, 10)].filter(Boolean).join("-");
+    doc.save(name + ".pdf");
+    m.className = "msg ok show";
+    m.textContent = `Downloaded ${sheetsSummary({ count: d.count, stores: d.sheets.length })}.`;
+  } catch (e) {
+    m.className = "msg err show";
+    m.textContent = "Could not make the PDF: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 $("csv").onclick = () => {
