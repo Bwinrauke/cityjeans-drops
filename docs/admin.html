@@ -122,6 +122,40 @@
   .p-draft{background:var(--chip2-bg); color:var(--chip2-fg)}
   .p-closed{background:var(--warn-bg); color:var(--warn-fg)}
   .p-archived{background:var(--chip-bg); color:var(--chip-fg)}
+  /* ── store pickup sheets (print / save as PDF) ──────────────
+     Hidden on screen; in print it is the only thing on the page. Always black
+     on white regardless of the dark/light toggle, because this ends up on a
+     counter printer, not a monitor. */
+  #printRoot{display:none}
+  @media print{
+    @page{size:letter portrait; margin:14mm}
+    html,body{background:#fff !important}
+    body > *{display:none !important}
+    body > #printRoot{display:block !important}
+    #printRoot{color:#000; font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    .sheet{page-break-after:always; break-after:page}
+    .sheet:last-child{page-break-after:auto; break-after:auto}
+    .sheet h1{font-size:19px; margin:0 0 2px; letter-spacing:-.01em}
+    .sheet .meta{font-size:11.5px; color:#333; margin:0 0 14px}
+    .sheet h2{font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+      margin:16px 0 6px; padding-bottom:4px; border-bottom:1.5px solid #000}
+    .sheet table{width:100%; border-collapse:collapse; font-size:12px}
+    .sheet th{text-align:left; font-size:9.5px; letter-spacing:.08em;
+      text-transform:uppercase; color:#444; border-bottom:1px solid #999; padding:4px 6px}
+    .sheet td{padding:6px; border-bottom:1px solid #ddd; vertical-align:top}
+    .sheet tr{break-inside:avoid}
+    .sheet .tick{width:22px; text-align:center}
+    .sheet .box{display:inline-block; width:13px; height:13px; border:1.4px solid #000}
+    .sheet .pull{max-width:280px}
+    .sheet .pull td{font-size:14px; font-weight:700}
+    .sheet .pull .n{font-size:17px}
+    .sheet .tot{font-weight:800; border-top:2px solid #000}
+    .sheet .foot{margin-top:18px; font-size:10px; color:#555;
+      border-top:1px solid #ccc; padding-top:6px}
+    .sheet .code{font-weight:800; letter-spacing:.04em; white-space:nowrap}
+    .sheet .st{font-size:9.5px; text-transform:uppercase; letter-spacing:.06em; color:#555}
+    .sheet .none{padding:18px 0; color:#555; font-style:italic}
+  }
   .relstate{display:inline-block; padding:2px 8px; border-radius:99px; font-size:9px;
     font-weight:800; letter-spacing:.06em; text-transform:uppercase; vertical-align:middle}
   .relstate.shut{background:var(--danger-bg); color:var(--danger-fg)}
@@ -422,6 +456,7 @@
     <div class="rowbtns" style="margin-bottom:14px">
       <button class="btn ghost sm" id="refreshRes">Refresh</button>
       <button class="btn ghost sm manager-only" id="csv">Export CSV</button>
+      <button class="btn ghost sm" id="printSheets">Print store sheets</button>
       <label class="chk manager-only"><input type="checkbox" id="showArch"> Show archived</label>
       <button class="btn ghost sm manager-only" id="archBulk">Archive these…</button>
       <span class="hint" id="rcount"></span>
@@ -1971,6 +2006,123 @@ $("archBulk").onclick = () => {
   }
 };
 
+// ── store pickup sheets ───────────────────────────────────────
+// One page per store, built from whatever the filters currently show, so a
+// manager can print the lot and hand each location its own page — or filter to
+// one store and "Save as PDF" to send it. Two sections per store because the
+// job has two halves: pull the pairs off the shelf, then hand them over.
+function sizeRank(v) {
+  const s = String(v ?? "").trim();
+  const n = parseFloat(s.replace(/[^0-9.]/g, ""));
+  // keep youth/toddler scales apart from men's so 4Y never sorts next to 4
+  const scale = /y$/i.test(s) ? 0 : /^(td|ps)/i.test(s) ? -1 : 1;
+  return [scale, isNaN(n) ? 999 : n, s];
+}
+const bySize = (a, b) => {
+  const x = sizeRank(a), y = sizeRank(b);
+  return x[0] - y[0] || x[1] - y[1] || String(x[2]).localeCompare(String(y[2]));
+};
+
+function buildStoreSheets() {
+  const relName = id => (state.releases.find(r => r.id === id) || {}).name || "—";
+  const locName = id => (state.locations.find(l => l.id === id) || {}).name || "—";
+
+  // same rows the table is showing: server filters plus the search box
+  const q = $("fQ").value.trim().toLowerCase();
+  const rows = state.reservations.filter(r => !q ||
+    [r.code, r.first_name, r.last_name, r.email, r.phone, r.phone_norm]
+      .join(" ").toLowerCase().includes(q));
+
+  if (!rows.length) return { html: "", count: 0, stores: 0 };
+
+  // group by store, then by release inside it
+  const byStore = new Map();
+  rows.forEach(r => {
+    const k = r.location_id || "none";
+    if (!byStore.has(k)) byStore.set(k, []);
+    byStore.get(k).push(r);
+  });
+
+  const printed = new Date().toLocaleString([], {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit" });
+  const statusLabel = { confirmed: "To collect", picked_up: "Picked up",
+                        cancelled: "Cancelled", no_show: "No show" };
+
+  const order = state.locations.map(l => l.id);
+  const stores = [...byStore.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+
+  const sheets = stores.map(locId => {
+    const list = byStore.get(locId).slice().sort((a, b) =>
+      bySize(a.size, b.size) ||
+      String(a.last_name || "").localeCompare(String(b.last_name || "")) ||
+      String(a.first_name || "").localeCompare(String(b.first_name || "")));
+
+    const releases = [...new Set(list.map(r => relName(r.release_id)))];
+    const toCollect = list.filter(r => r.status === "confirmed");
+
+    // pull sheet: how many pairs of each size this store needs on the shelf
+    const counts = new Map();
+    toCollect.forEach(r => counts.set(r.size, (counts.get(r.size) || 0) + 1));
+    const sizes = [...counts.keys()].sort(bySize);
+
+    const pull = sizes.length
+      ? `<table class="pull"><thead><tr><th>Size</th><th>Pairs to pull</th></tr></thead><tbody>
+           ${sizes.map(sz => `<tr><td>${esc(sz)}</td><td class="n">${counts.get(sz)}</td></tr>`).join("")}
+           <tr class="tot"><td>Total</td><td class="n">${toCollect.length}</td></tr>
+         </tbody></table>`
+      : `<p class="none">Nothing left to pull for this store.</p>`;
+
+    const pickup = list.length
+      ? `<table><thead><tr>
+           <th class="tick"></th><th>Size</th><th>Code</th><th>Customer</th>
+           <th>Phone</th><th>Status</th></tr></thead><tbody>
+           ${list.map(r => `<tr>
+             <td class="tick"><span class="box"></span></td>
+             <td><b>${esc(r.size)}</b></td>
+             <td class="code">${esc(r.code)}</td>
+             <td>${esc([r.first_name, r.last_name].filter(Boolean).join(" "))}</td>
+             <td>${esc(fmtPhone(r.phone))}</td>
+             <td class="st">${esc(statusLabel[r.status] || r.status || "")}</td>
+           </tr>`).join("")}
+         </tbody></table>`
+      : `<p class="none">No reservations for this store.</p>`;
+
+    return `<section class="sheet">
+      <h1>${esc(locName(locId))} — pickup sheet</h1>
+      <p class="meta">${esc(releases.join(" · "))}<br>
+        ${toCollect.length} to collect${
+          list.length !== toCollect.length
+            ? ` · ${list.length - toCollect.length} already settled` : ""
+        } · printed ${esc(printed)}</p>
+      <h2>Pull sheet</h2>${pull}
+      <h2>Pickup list</h2>${pickup}
+      <p class="foot">Check the code against the customer's screenshot before handing
+        a pair over. A code held at another store will be refused at the register —
+        send them to the store named on their confirmation.</p>
+    </section>`;
+  }).join("");
+
+  return { html: sheets, count: rows.length, stores: stores.length };
+}
+
+$("printSheets").onclick = () => {
+  const m = $("archmsg");
+  const out = buildStoreSheets();
+  if (!out.count) {
+    m.className = "msg err show";
+    m.textContent = "Nothing to print — no reservations match the current filters.";
+    return;
+  }
+  $("printRoot").innerHTML = out.html;
+  m.className = "msg ok show";
+  m.textContent = `Printing ${out.count} reservation${out.count === 1 ? "" : "s"} across ` +
+    `${out.stores} store${out.stores === 1 ? "" : "s"} — one page each. ` +
+    `Choose "Save as PDF" in the print dialog to send it on.`;
+  // let the browser paint the sheets before the dialog takes over
+  setTimeout(() => window.print(), 60);
+};
+
 $("csv").onclick = () => {
   const relName = id => (state.releases.find(r => r.id === id) || {}).name || "";
   const locName = id => (state.locations.find(l => l.id === id) || {}).name || "";
@@ -2026,5 +2178,6 @@ $("loginLogo").textContent = $("appLogo").textContent = CFG.BRAND;
 boot();
 })();
 </script>
+<div id="printRoot"></div>
 </body>
 </html>
