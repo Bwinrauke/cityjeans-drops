@@ -76,6 +76,32 @@ const { chromium, devices } = require('playwright');
     return;
   }
 
+  // ── safety rail ─────────────────────────────────────────────
+  // This suite runs against the database real customers use. A test once
+  // redeemed a real customer's pair days before the drop, and archived another,
+  // because two steps acted on "the first row in the table". So every
+  // destructive step books its own throwaway with makeOwnBooking() and calls
+  // assertOurs(code) before touching it. Never act on an arbitrary live row.
+  const isTestEmail = e => /^(zz-|e2e)/i.test(e || '') || /@example\.com$/i.test(e || '');
+  const ours = new Set();   // every reservation this run made, released at the end
+
+  const makeOwnBooking = async (tag = 'own') => {
+    for (const f of TEST.free) {
+      const stamp = String(Date.now()) + String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+      const r = await call('reserve_spot', {
+        p_release_slug: TEST.slug, p_location_id: f.location_id, p_size: f.size,
+        p_first_name: 'ZZ', p_last_name: 'E2E ' + tag,
+        p_email: `zz-e2e-${tag}-${stamp}@example.com`, p_phone: '917' + stamp.slice(-7) });
+      if (r.ok) { ours.add(r.code); return { code: r.code, location_id: f.location_id, size: f.size }; }
+      if (r.error !== 'sold_out') throw new Error('makeOwnBooking: ' + JSON.stringify(r).slice(0, 160));
+    }
+    throw new Error('makeOwnBooking: no stock left on ' + TEST.slug);
+  };
+
+  // needs the admin session (customers cannot read reservations), so it is
+  // only usable once the admin half has signed in
+  let assertOurs = async () => { throw new Error('assertOurs called before admin sign-in'); };
+
   console.log('\n--- CUSTOMER FLOW ---');
   await page.goto(`http://localhost:8900/index.html?release=${TEST.slug}`, { waitUntil: 'domcontentloaded' });
 
@@ -184,6 +210,7 @@ const { chromium, devices } = require('playwright');
     await page.waitForSelector('#s-done.active', { timeout: 12000 });
     code = (await page.textContent('.code')).trim();
     if (!/^CJ-[0-9A-Z]{6}$/.test(code)) throw new Error('code = ' + code);
+    ours.add(code);
     const qr = await page.evaluate(() => {
       const el = document.querySelector('#qr img, #qr canvas');
       return el ? (el.width || el.naturalWidth) : 0;
@@ -335,6 +362,19 @@ const { chromium, devices } = require('playwright');
       H, 'http://localhost:8900', rest);
   }, [fn.toString(), ...args]);
 
+  assertOurs = async (code) => {
+    const rows = await adminFetch(async (H, url, a) => {
+      const r = await fetch(`${url}/rest/v1/reservations?select=id,email,status,archived_at` +
+        `&code=eq.${encodeURIComponent(a[0])}`, { headers: H });
+      return r.json();
+    }, [code]);
+    if (!Array.isArray(rows) || rows.length !== 1)
+      throw new Error(`assertOurs: ${code} matched ${Array.isArray(rows) ? rows.length : 'no'} rows`);
+    if (!isTestEmail(rows[0].email))
+      throw new Error(`assertOurs: refusing to touch ${code}, it is not a test booking`);
+    return rows[0];
+  };
+
   await step('admin login works', async () => {
     await page2.goto('http://localhost:8900/admin.html', { waitUntil: 'domcontentloaded' });
     await page2.fill('#e', ADMIN_EMAIL);
@@ -394,6 +434,7 @@ const { chromium, devices } = require('playwright');
 
   await step('register redeems the code once, then refuses a second time', async () => {
     await page2.click('.tab[data-v="v-reg"]');
+    await assertOurs(code);
     // a register is bound to one store, so bind it to the one this pair is held at
     const held = await adminFetch(async (H, url, a) => {
       const r = await fetch(`${url}/rest/v1/reservations?select=location_id&code=eq.${a[0]}`,
@@ -659,18 +700,20 @@ const { chromium, devices } = require('playwright');
 
   console.log('\n--- ARCHIVING ---');
   await step('archiving hides a row, restoring brings it back', async () => {
+    // our own booking, never whichever row happens to be first
+    const mine = await makeOwnBooking('arch');
+    await assertOurs(mine.code);
+
     await page2.click('.tab[data-v="v-res"]');
     await page2.waitForSelector('#resTable tbody tr');
     await page2.uncheck('#showArch').catch(() => {});
-    await page2.fill('#fQ', '');
-    await page2.waitForTimeout(500);
+    await page2.click('#refreshRes'); await page2.waitForTimeout(900);
+    await page2.fill('#fQ', mine.code); await page2.waitForTimeout(500);
+    const target = page2.locator('#resTable tbody tr', { hasText: mine.code });
+    if ((await target.count()) !== 1) throw new Error('could not find our own row ' + mine.code);
 
-    const before = await page2.locator('#resTable [data-arch]').count();
-    if (!before) return;   // nothing live to archive
-    const target = page2.locator('#resTable tbody tr').filter({ has: page2.locator('[data-arch]') }).first();
-    const codeCell = (await target.locator('td').first().textContent()).trim().split(' ')[0];
-
-    // a confirmed row prompts about the held pair; decline so stock is untouched
+    // a confirmed row prompts about the held pair; decline so it stays held,
+    // which is the path this step is testing
     armDialog(d => d.dismiss());
     await target.locator('[data-arch]').click();
     await page2.waitForSelector('#archmsg.show', { timeout: 15000 });
@@ -678,57 +721,45 @@ const { chromium, devices } = require('playwright');
     if (!/archived/i.test(msg)) throw new Error('archive said: ' + msg);
 
     await page2.waitForTimeout(600);
-    const after = await page2.locator('#resTable [data-arch]').count();
-    if (after >= before) throw new Error(`archivable rows went ${before} -> ${after}`);
-    const stillThere = await page2.textContent('#resTable');
-    if (stillThere.includes(codeCell)) throw new Error(codeCell + ' is still listed');
+    if ((await page2.textContent('#resTable')).includes(mine.code))
+      throw new Error(mine.code + ' is still listed');
 
     // it reappears with the box ticked, flagged as archived
     await page2.check('#showArch');
     await page2.waitForTimeout(900);
-    const withArch = await page2.textContent('#resTable');
-    if (!withArch.includes(codeCell)) throw new Error('archived row not shown when asked for');
-    const row = page2.locator('#resTable tbody tr', { hasText: codeCell }).first();
+    const row = page2.locator('#resTable tbody tr', { hasText: mine.code }).first();
+    if (!(await row.count())) throw new Error('archived row not shown when asked for');
     if (!(await row.getAttribute('class') || '').includes('arch'))
       throw new Error('archived row is not marked');
 
     // restore it
+    await assertOurs(mine.code);
     await row.locator('[data-unarch]').click();
     await page2.waitForSelector('#archmsg.show', { timeout: 15000 });
     if (!/brought back/i.test(await page2.textContent('#archmsg')))
       throw new Error('restore said: ' + await page2.textContent('#archmsg'));
     await page2.uncheck('#showArch');
     await page2.waitForTimeout(900);
-    if (!(await page2.textContent('#resTable')).includes(codeCell))
+    if (!(await page2.textContent('#resTable')).includes(mine.code))
       throw new Error('restored row did not come back to the default list');
+    await page2.fill('#fQ', '');
   });
 
   await step('archiving a test booking can hand the pair back', async () => {
-    // make a throwaway reservation, then archive it releasing the stock
-    const em = 'e2e-arch' + Date.now() + '@example.com';
-    const ph = '917' + String(Date.now()).slice(-7);
-    const made = await page2.evaluate(async ([url, key, em, ph, slug, loc, size]) => {
-      const r = await fetch(url + '/rest/v1/rpc/reserve_spot', {
-        method: 'POST',
-        headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_release_slug: slug,
-          p_location_id: loc, p_size: size, p_first_name: 'Arch', p_last_name: 'Test',
-          p_email: em, p_phone: ph })
-      });
-      return r.json();
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', em, ph,
-        TEST.slug, TEST.free[0].location_id, TEST.free[0].size]);
-    if (!made.ok) return;   // no stock left; the row-level path above already covers it
+    const mine = await makeOwnBooking('handback');
+    await assertOurs(mine.code);
 
     await page2.click('#refreshRes'); await page2.waitForTimeout(900);
-    await page2.fill('#fQ', made.code); await page2.waitForTimeout(500);
-    const row = page2.locator('#resTable tbody tr').first();
+    await page2.fill('#fQ', mine.code); await page2.waitForTimeout(500);
+    const row = page2.locator('#resTable tbody tr', { hasText: mine.code });
+    if ((await row.count()) !== 1) throw new Error('could not find our own row ' + mine.code);
     armDialog(d => d.accept());   // yes, put the pair back
     await row.locator('[data-arch]').click();
     await page2.waitForSelector('#archmsg.show', { timeout: 15000 });
     const m2 = await page2.textContent('#archmsg');
     if (!/released back to stock/i.test(m2))
       throw new Error('expected the pair to be released: ' + m2);
+    ours.delete(mine.code);   // already handed back
     await page2.fill('#fQ', '');
   });
 
@@ -1049,14 +1080,17 @@ const { chromium, devices } = require('playwright');
 
   console.log('\n--- WRONG STORE ---');
   await step('a code scanned at the wrong store is refused, right store works', async () => {
-    const out = await page2.evaluate(async ([url, key, em, pw]) => {
+    // this used to redeem the first confirmed reservation in the database,
+    // which is how a real customer's pair got marked picked up
+    const mine = await makeOwnBooking('store');
+    await assertOurs(mine.code);
+    const out = await page2.evaluate(async ([url, key, em, pw, code, held]) => {
       const tok = await (await fetch(url + '/auth/v1/token?grant_type=password', {
         method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: em, password: pw }) })).json();
       const A = { apikey: key, Authorization: 'Bearer ' + tok.access_token, 'Content-Type': 'application/json' };
       const locs = await (await fetch(url + '/rest/v1/locations?select=id,name&active=eq.true&order=sort_order&limit=2', { headers: A })).json();
-      const rs = await (await fetch(url + '/rest/v1/reservations?select=code,location_id&status=eq.confirmed&limit=1', { headers: A })).json();
-      if (!rs.length) return { skip: true };
+      const rs = [{ code, location_id: held }];
       const other = locs.find(l => l.id !== rs[0].location_id) || locs[0];
       const wrong = await (await fetch(url + '/rest/v1/rpc/redeem_reservation', {
         method: 'POST', headers: A,
@@ -1066,8 +1100,7 @@ const { chromium, devices } = require('playwright');
         body: JSON.stringify({ p_code: rs[0].code, p_at_location: rs[0].location_id }) })).json();
       return { wrong, right };
     }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a',
-        ADMIN_EMAIL, ADMIN_PASS]);
-    if (out.skip) return;
+        ADMIN_EMAIL, ADMIN_PASS, mine.code, mine.location_id]);
     if (out.wrong.ok || out.wrong.error !== 'wrong_store')
       throw new Error('wrong store was allowed: ' + JSON.stringify(out.wrong).slice(0, 160));
     if (!/held at/i.test(out.wrong.message || ''))
@@ -1076,10 +1109,15 @@ const { chromium, devices } = require('playwright');
   });
 
   console.log('\n--- SUSPENSIONS ---');
+  // sweep_no_shows_now marks every overdue reservation in the database and
+  // suspends whoever it finds, not just the rows below. Against live data that
+  // touches real customers, so it only runs when asked for explicitly.
+  const SWEEP_OK = process.env.DROPS_ALLOW_SWEEP === '1';
+  if (!SWEEP_OK) console.log('  SKIP  suspension checks (the sweep touches every reservation; set DROPS_ALLOW_SWEEP=1 on a test database)');
   const SUSP_PHONE = '2125' + String(Date.now()).slice(-6);
   let suspId = null;
 
-  await step('two missed pickups in a row suspends, one does not', async () => {
+  if (SWEEP_OK) await step('two missed pickups in a row suspends, one does not', async () => {
     // two closed drops whose pickup windows are already past, so the nightly
     // sweep has something real to find
     const made = await adminFetch(async (H, url, a) => {
@@ -1138,7 +1176,7 @@ const { chromium, devices } = require('playwright');
     suspId = mine.id;
   });
 
-  await step('a suspended person cannot reserve or enter, under any email', async () => {
+  if (SWEEP_OK) await step('a suspended person cannot reserve or enter, under any email', async () => {
     const out = await page.evaluate(async ([url, key, slug, phone]) => {
       const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
       const loc = (await (await fetch(
@@ -1158,7 +1196,7 @@ const { chromium, devices } = require('playwright');
       throw new Error('the refusal does not say when it ends: ' + out.message);
   });
 
-  await step('the suspended tab lists them with the time left', async () => {
+  if (SWEEP_OK) await step('the suspended tab lists them with the time left', async () => {
     await page2.click('.tab[data-v="v-susp"]');
     await page2.waitForSelector('#v-susp.on');
     await page2.waitForSelector('#suspTable tbody tr', { timeout: 15000 });
@@ -1167,7 +1205,7 @@ const { chromium, devices } = require('playwright');
     if (!/day[s]? left/i.test(t)) throw new Error('no countdown shown: ' + t.slice(0, 200));
   });
 
-  await step('a manager can reactivate early, and then they can book again', async () => {
+  if (SWEEP_OK) await step('a manager can reactivate early, and then they can book again', async () => {
     armDialog(d => d.accept('customer called, family emergency'));
     await page2.locator(`[data-lift="${suspId}"]`).click();
     await page2.waitForSelector('#suspMsg.show', { timeout: 15000 });
@@ -1186,10 +1224,11 @@ const { chromium, devices } = require('playwright');
           p_email: 'zz-after-lift-' + phone + '@example.com', p_phone: phone }) })).json();
     }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a',
         TEST.slug, SUSP_PHONE]);
+    if (out.ok) ours.add(out.code);
     if (out.error === 'suspended') throw new Error('still blocked after the lift');
   });
 
-  await step('the same two misses cannot suspend them a second time', async () => {
+  if (SWEEP_OK) await step('the same two misses cannot suspend them a second time', async () => {
     const sweep = await page2.evaluate(async ([url, key]) => {
       const tok = localStorage.getItem('drops_at');
       return await (await fetch(url + '/rest/v1/rpc/sweep_no_shows_now', {
@@ -1270,10 +1309,10 @@ const { chromium, devices } = require('playwright');
       const call = async (fn, body) =>
         (await (await fetch(url + '/rest/v1/rpc/' + fn, { method: 'POST', headers: H, body: JSON.stringify(body) })).json());
       return {
-        revoke: await call('revoke_user', { p_email: 'ben@cityjeans.com' }),
+        revoke: await call('revoke_user', { p_email: em }),
         lift:   await call('lift_suspension', { p_id: '00000000-0000-0000-0000-000000000000' }),
         sweep:  await call('sweep_no_shows_now', {}),
-        create: await call('create_staff_account', { p_email: 'a@b.com', p_password: 'aaaaaaaaaaaa', p_role: 'owner' }),
+        create: await call('create_staff_account', { p_email: 'zz-never-' + Date.now() + '@example.com', p_password: 'aaaaaaaaaaaa', p_role: 'owner' }),
         list:   await call('list_staff', {})
       };
     }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', cashier, 'cashier-own-pass-1']);
@@ -1472,6 +1511,31 @@ const { chromium, devices } = require('playwright');
       throw new Error('anon can see draft releases');
     if (Array.isArray(out.inv) && out.inv.length)
       throw new Error('anon can read raw inventory counts');
+  });
+
+  console.log('\n--- CLEANUP ---');
+  await step('every test booking is cancelled and its pair handed back', async () => {
+    const left = [];
+    for (const c of ours) {
+      let row;
+      try { row = await assertOurs(c); } catch (e) { left.push(c + ' (' + e.message + ')'); continue; }
+      if (row.archived_at && row.status === 'cancelled') continue;
+      const r = await adminFetch(async (H, url, a) => {
+        const [id, status] = a;
+        // a redeemed test pair still counts against stock; cancel it first so
+        // the recount below gives it back
+        if (status === 'picked_up') await fetch(`${url}/rest/v1/reservations?id=eq.${id}`, {
+          method: 'PATCH', headers: H, body: JSON.stringify({ status: 'cancelled' }) });
+        if (status === 'picked_up' || status === 'confirmed') {
+          if (a[2]) await fetch(`${url}/rest/v1/rpc/archive_reservations`, { method: 'POST', headers: H,
+            body: JSON.stringify({ p_ids: [id], p_unarchive: true }) });
+        }
+        return (await fetch(`${url}/rest/v1/rpc/archive_reservations`, { method: 'POST', headers: H,
+          body: JSON.stringify({ p_ids: [id], p_release_stock: true }) })).json();
+      }, [row.id, row.status, !!row.archived_at]);
+      if (!r.ok) left.push(c + ' (' + (r.message || r.error) + ')');
+    }
+    if (left.length) throw new Error('could not release: ' + left.join(', '));
   });
 
   await browser.close();

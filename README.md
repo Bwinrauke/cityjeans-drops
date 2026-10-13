@@ -159,6 +159,15 @@ Test rows use a `zz-` prefix and `@example.com` addresses. `claim_notifications`
 retires both rather than sending: every one would bounce, and bounce rate is
 what SES suspends an account over.
 
+**The suite never acts on a row it didn't make.** Every destructive step books
+its own throwaway with `makeOwnBooking()` and passes the code through
+`assertOurs()`, which refuses any reservation whose email isn't a `zz-`, `e2e`
+or `@example.com` test address. A final cleanup step cancels every booking the
+run made and hands its pair back to stock. The no-show sweep is the one step
+that can't be scoped, because it marks every overdue reservation in the
+database, so the suspension checks only run with `DROPS_ALLOW_SWEEP=1`. Set that
+only against a test database.
+
 ---
 
 ## Notifications
