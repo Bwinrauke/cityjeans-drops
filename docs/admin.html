@@ -2124,6 +2124,22 @@ $("printSheets").onclick = () => {
 };
 
 $("csv").onclick = () => {
+  // one release per file: a store or a brand rep wants their drop's list, not
+  // every drop mixed together
+  const m = $("archmsg");
+  const rel = state.releases.find(r => r.id === $("fRel").value);
+  if (!rel) {
+    m.className = "msg err show";
+    m.textContent = "Choose a release in the Release filter first. The export covers one release at a time.";
+    return;
+  }
+  const rows = state.reservations.filter(r => r.release_id === rel.id);
+  if (!rows.length) {
+    m.className = "msg err show";
+    m.textContent = `Nothing to export for ${rel.name} with the current filters.`;
+    return;
+  }
+  m.classList.remove("show");
   const relName = id => (state.releases.find(r => r.id === id) || {}).name || "";
   const locName = id => (state.locations.find(l => l.id === id) || {}).name || "";
   const head = ["Code","First","Last","Email","Phone","Size","Store","Release","Status","Reserved at","Picked up at"];
@@ -2136,7 +2152,7 @@ $("csv").onclick = () => {
     if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
     return `"${v.replace(/"/g,'""')}"`;
   };
-  const csv = [head.join(",")].concat(state.reservations.map(r => [
+  const csv = [head.join(",")].concat(rows.map(r => [
     r.code, r.first_name, r.last_name, r.email, r.phone, r.size,
     locName(r.location_id), relName(r.release_id), r.status,
     new Date(r.created_at).toLocaleString(),
@@ -2144,7 +2160,8 @@ $("csv").onclick = () => {
   ].map(q).join(","))).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type:"text/csv" }));
-  a.download = "reservations-" + new Date().toISOString().slice(0,10) + ".csv";
+  const slug = String(rel.slug || rel.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  a.download = `reservations-${slug}-${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
 };
 
