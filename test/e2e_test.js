@@ -874,22 +874,6 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('entering holds no pair, and a second entry is taken but flagged', async () => {
-    const loc = await page2.evaluate(async ([url, key]) => {
-      const r = await fetch(url + '/rest/v1/locations?select=id&active=eq.true&order=sort_order&limit=1',
-        { headers: { apikey: key, Authorization: 'Bearer ' + key } });
-      return (await r.json())[0].id;
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a']);
-
-    const enter = (em, ph) => page2.evaluate(async ([url, key, slug, loc, em, ph]) => {
-      const r = await fetch(url + '/rest/v1/rpc/enter_raffle', {
-        method: 'POST',
-        headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_release_slug: slug, p_location_id: loc, p_size: null,
-          p_first_name: 'Ent', p_last_name: 'Rant', p_email: em, p_phone: ph,
-          p_agree: true }) });
-      return r.json();
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', RAF, loc, em, ph]);
-
     // find the size that was ticked
     const size = await adminFetch(async (H, url, a) => {
       const r = await fetch(`${url}/rest/v1/release_inventory?select=size&release_id=eq.${a[0]}`, { headers: H });
@@ -897,21 +881,30 @@ const { chromium, devices } = require('playwright');
     }, [rafId]);
     if (!size) throw new Error('no size row was created for the raffle');
 
-    const enterSized = (em, ph) => page2.evaluate(async ([url, key, slug, loc, em, ph, size]) => {
+    // entrants give no store, only a size and an Instagram handle
+    const enterSized = (em, ph, ig) => page2.evaluate(async ([url, key, slug, em, ph, size, ig]) => {
       const r = await fetch(url + '/rest/v1/rpc/enter_raffle', {
         method: 'POST',
         headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_release_slug: slug, p_location_id: loc, p_size: size,
+        body: JSON.stringify({ p_release_slug: slug, p_size: size,
           p_first_name: 'Ent', p_last_name: 'Rant', p_email: em, p_phone: ph,
+          p_instagram: ig === undefined ? '@' + em.split('@')[0].replace(/[^a-z0-9._]/gi, '_') : ig,
           p_agree: true }) });
       return r.json();
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', RAF, loc, em, ph, size]);
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', RAF, em, ph, size, ig]);
+
+    const noIg = await enterSized('zz-raf-noig@example.com', '9998880090', '');
+    if (noIg.ok || noIg.error !== 'bad_instagram')
+      throw new Error('an entry with no Instagram handle was accepted: ' + JSON.stringify(noIg).slice(0, 160));
 
     const first = await enterSized(entrantEmail, '9998880001');
     if (!first.ok) throw new Error('first entry failed: ' + JSON.stringify(first).slice(0, 160));
     entryCode = first.code;
     if (!/^RF-[0-9A-Z]{6}$/.test(entryCode)) throw new Error('entry code = ' + entryCode);
     if (first.duplicate) throw new Error('a first entry was flagged as a duplicate');
+    if (first.entry.instagram !== 'zz-raf-lead'.replace(/-/g, '_'))
+      throw new Error('instagram stored as ' + first.entry.instagram);
+    if (first.entry.location) throw new Error('an entry was given a store before the draw');
 
     // more entries so there are losers
     for (let i = 2; i <= 6; i++) await enterSized(`zz-raf-${i}@example.com`, '99988800' + String(i).padStart(2,'0'));
@@ -934,25 +927,19 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('the rules are shown, and entering without agreeing is refused', async () => {
-    const loc = await page2.evaluate(async ([url, key]) => {
-      const r = await fetch(url + '/rest/v1/locations?select=id&active=eq.true&order=sort_order&limit=1',
-        { headers: { apikey: key, Authorization: 'Bearer ' + key } });
-      return (await r.json())[0].id;
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a']);
-
     // the server refuses an unticked entry, whatever the page does
     const size = await adminFetch(async (H, url, a) => {
       const r = await fetch(`${url}/rest/v1/release_inventory?select=size&release_id=eq.${a[0]}`, { headers: H });
       return (await r.json())[0]?.size;
     }, [rafId]);
-    const bare = await page.evaluate(async ([url, key, slug, loc, size]) => {
+    const bare = await page.evaluate(async ([url, key, slug, size]) => {
       const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
       return await (await fetch(url + '/rest/v1/rpc/enter_raffle', {
         method: 'POST', headers: H,
-        body: JSON.stringify({ p_release_slug: slug, p_location_id: loc, p_size: size,
+        body: JSON.stringify({ p_release_slug: slug, p_size: size,
           p_first_name: 'No', p_last_name: 'Consent', p_email: 'zz-noconsent@example.com',
-          p_phone: '9998887000' }) })).json();
-    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', RAF, loc, size]);
+          p_phone: '9998887000', p_instagram: 'zz_noconsent' }) })).json();
+    }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', RAF, size]);
     if (bare.ok || bare.error !== 'rules_not_accepted')
       throw new Error('an entry with no consent was accepted: ' + JSON.stringify(bare).slice(0, 160));
 
@@ -962,9 +949,9 @@ const { chromium, devices } = require('playwright');
     await rp.goto(`http://localhost:8900/index.html?release=${RAF}`, { waitUntil: 'domcontentloaded' });
     await rp.waitForSelector('#s-size.active', { timeout: 15000 });
     await rp.locator('#sizes .size:not(.out)').first().click();
-    await rp.click('#cta'); await rp.waitForSelector('#s-loc.active');
-    await rp.locator('#locs .loc').first().click();
+    // a raffle goes straight from size to details: no store is offered
     await rp.click('#cta'); await rp.waitForSelector('#s-info.active');
+    if (!(await rp.isVisible('#ig'))) throw new Error('no Instagram field on the raffle form');
     await rp.waitForSelector('#rulesBox .rules', { timeout: 10000 });
     const txt = await rp.textContent('#rulesBox');
     for (const must of ['ONLY 1 ENTRY PER PERSON', 'cityjeanspremium', 'DO NOT change sizes'])
@@ -987,12 +974,12 @@ const { chromium, devices } = require('playwright');
       const r = await fetch(url + '/rest/v1/rpc/enter_raffle', {
         method: 'POST',
         headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_release_slug: slug, p_location_id: null, p_size: '9',
+        body: JSON.stringify({ p_release_slug: slug, p_size: '9',
           p_first_name: 'Too', p_last_name: 'Late', p_email: 'zz-late@example.com',
-          p_phone: '9998887777', p_agree: true }) });
+          p_phone: '9998887777', p_instagram: 'zz_late', p_agree: true }) });
       return r.json();
     }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a', RAF]);
-    if (late.ok) throw new Error('an entry was accepted after entries closed');
+    if (late.ok || late.error !== 'closed') throw new Error('an entry was accepted after entries closed');
   });
 
   await step('the raffle tab shows demand and refuses to draw with no pairs', async () => {
@@ -1006,18 +993,18 @@ const { chromium, devices } = require('playwright');
   });
 
   await step('after allocating, the draw picks exactly the pairs loaded', async () => {
-    // allocate 2 pairs to the bucket the entrants actually chose
+    // allocate the size the entrants chose: one pair each at two stores, so the
+    // draw has to split its winners between them
     await adminFetch(async (H, url, a) => {
       const ent = await (await fetch(
-        `${url}/rest/v1/raffle_entries?select=location_id,size&release_id=eq.${a[0]}&limit=1`,
+        `${url}/rest/v1/raffle_entries?select=size&release_id=eq.${a[0]}&limit=1`,
         { headers: H })).json();
-      const b = ent[0];
       const rows = await (await fetch(
         `${url}/rest/v1/release_inventory?select=id&release_id=eq.${a[0]}` +
-        `&location_id=eq.${b.location_id}&size=eq.${encodeURIComponent(b.size)}`,
+        `&size=eq.${encodeURIComponent(ent[0].size)}&order=id&limit=2`,
         { headers: H })).json();
-      await fetch(`${url}/rest/v1/release_inventory?id=eq.${rows[0].id}`, {
-        method: 'PATCH', headers: H, body: JSON.stringify({ quantity_total: 2 }) });
+      for (const row of rows) await fetch(`${url}/rest/v1/release_inventory?id=eq.${row.id}`, {
+        method: 'PATCH', headers: H, body: JSON.stringify({ quantity_total: 1 }) });
     }, [rafId]);
 
     await page2.click('.tab[data-v="v-rel"]'); await page2.waitForTimeout(400);
@@ -1035,8 +1022,9 @@ const { chromium, devices } = require('playwright');
       const won  = await g(`raffle_entries?select=id&release_id=eq.${a[0]}&status=eq.won`);
       const lost = await g(`raffle_entries?select=id&release_id=eq.${a[0]}&status=eq.lost`);
       const dq   = await g(`raffle_entries?select=id&release_id=eq.${a[0]}&status=eq.disqualified`);
-      const rs   = await g(`reservations?select=id,code,source&release_id=eq.${a[0]}`);
+      const rs   = await g(`reservations?select=id,code,source,location_id&release_id=eq.${a[0]}`);
       return { won: won.length, lost: lost.length, dq: dq.length, reservations: rs.length,
+               stores: new Set(rs.map(r => r.location_id)).size,
                allRaffle: rs.every(r => r.source === 'raffle'),
                codes: rs.every(r => /^CJ-[0-9A-Z]{6}$/.test(r.code)) };
     }, [rafId]);
@@ -1045,6 +1033,7 @@ const { chromium, devices } = require('playwright');
     if (res.lost !== 3) throw new Error('expected 3 losers, got ' + res.lost);
     if (res.dq !== 2) throw new Error('expected both duplicate entries out, got ' + res.dq);
     if (res.reservations !== 2) throw new Error('winners did not become reservations');
+    if (res.stores !== 2) throw new Error('winners were not split across the two stores loaded');
     if (!res.allRaffle || !res.codes) throw new Error('winner reservations are malformed');
   });
 

@@ -381,6 +381,11 @@
              autocapitalize="off" spellcheck="false" enterkeyhint="next" placeholder="you@email.com">
       <label for="ph">Mobile number</label>
       <input id="ph" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="done" placeholder="(555) 123-4567">
+      <div id="igRow" style="display:none">
+        <label for="ig">Instagram handle</label>
+        <input id="ig" autocapitalize="off" autocorrect="off" spellcheck="false"
+               enterkeyhint="done" placeholder="@yourhandle">
+      </div>
       <div id="rulesBox"></div>
       <div class="err" id="err"></div>
       <p class="fine" id="fine"></p>
@@ -528,7 +533,8 @@
   $("back").onclick = () => {
     const cur = document.querySelector(".screen.active").id;
     if (cur === "s-lookup") return show(S.releases.length > 1 ? "s-list" : "s-size", 0);
-    if (cur === "s-info") return show("s-loc", 1);
+    // a raffle has no store step: the store is assigned at the draw
+    if (cur === "s-info") return isRaffle() ? show("s-size", 0) : show("s-loc", 1);
     if (cur === "s-loc")  return show("s-size", 0);
     if (cur === "s-size" && S.releases.length > 1) return show("s-list", 0);
   };
@@ -666,7 +672,7 @@
     const rows = [];
     const pu = when(r.pickup_starts_at, r.pickup_ends_at);
     if (pu) rows.push(["Pickup window", pu]);
-    if (r.closes_at) rows.push(["Reservations close", when(r.closes_at)]);
+    if (r.closes_at) rows.push([isRaffle() ? "Entries close" : "Reservations close", when(r.closes_at)]);
     if (r.colorway) rows.push(["Colorway", r.colorway]);
     rows.push(["Limit", r.limit_per_customer + " pair per person"]);
     $("meta").innerHTML = rows.map(([k,v]) =>
@@ -732,7 +738,8 @@
     $("recap").innerHTML = `
       ${r.photo_url ? `<img src="${esc(r.photo_url)}" alt="">` : `<img alt="">`}
       <div><div class="t">${esc(r.name)}</div>
-      <div class="s">${esc(SCALE_TAG[r.size_scale] || "US")} ${esc(S.size)} · ${esc(l ? l.name : "")}</div></div>`;
+      <div class="s">${esc(SCALE_TAG[r.size_scale] || "US")} ${esc(S.size)}${l ? " · " + esc(l.name) : ""}</div></div>`;
+    $("igRow").style.display = isRaffle() ? "" : "none";
     paintFine();
     paintRules();
   }
@@ -809,7 +816,8 @@
       <div class="tdiv"></div>
       <div class="tshoe">${esc(res.release)}</div>
       <div class="trow"><span class="k">Size</span><span class="v">${esc(SCALE_TAG[res.size_scale] || "US")} ${esc(res.size)}</span></div>
-      <div class="trow"><span class="k">${entry ? "Collect at if you win" : "Pick up at"}</span><span class="v">${esc(res.location)}</span></div>
+      ${res.location ? `<div class="trow"><span class="k">${entry ? "Collect at if you win" : "Pick up at"}</span><span class="v">${esc(res.location)}</span></div>` : ""}
+      ${res.instagram ? `<div class="trow"><span class="k">Instagram</span><span class="v">@${esc(res.instagram)}</span></div>` : ""}
       <div class="trow"><span class="k">Name</span><span class="v">${esc(res.first_name)} ${esc(res.last_name)}</span></div>
       ${res.retail_price != null ? `<div class="trow"><span class="k">Price</span><span class="v">${money(res.retail_price)}</span></div>` : ""}
       ${entry && res.closes_at
@@ -845,7 +853,9 @@
         `we email everyone once the draw runs, win or lose. Check your spam ` +
         `folder if you don't see it.<br><br>` +
         `You don't need to check back or keep this open.<br><br>` +
-        `Winners get a pickup code to bring to ${esc(res.location)}. ` +
+        (res.location
+          ? `Winners get a pickup code to bring to ${esc(res.location)}. `
+          : `Winners are emailed their pickup store and code. `) +
         `One entry per person — enter twice and every entry is disqualified.`;
     } else {
       $("shot").style.display = "";
@@ -867,7 +877,10 @@
 
   $("cta").onclick = async () => {
     const cur = document.querySelector(".screen.active").id;
-    if (cur === "s-size") { paintLocs(); return show("s-loc", 1); }
+    if (cur === "s-size") {
+      if (isRaffle()) { paintRecap(); return show("s-info", 2); }
+      paintLocs(); return show("s-loc", 1);
+    }
     if (cur === "s-loc")  { paintRecap(); return show("s-info", 2); }
     if (cur === "s-done") { return location.reload(); }
 
@@ -892,11 +905,14 @@
       btn.textContent = isRaffle() ? "Entering…" : "Reserving…";
       try {
         const args = {
-          p_release_slug: S.release.slug, p_location_id: S.loc, p_size: S.size,
+          p_release_slug: S.release.slug, p_size: S.size,
           p_first_name: $("fn").value, p_last_name: $("ln").value,
           p_email: $("em").value, p_phone: $("ph").value
         };
-        if (isRaffle()) args.p_agree = !!($("agree") && $("agree").checked);
+        if (isRaffle()) {
+          args.p_agree = !!($("agree") && $("agree").checked);
+          args.p_instagram = $("ig").value;
+        } else args.p_location_id = S.loc;
         const r = await rpc(isRaffle() ? "enter_raffle" : "reserve_spot", args);
         if (r.ok) {
           const t = r.reservation || r.entry;

@@ -515,7 +515,7 @@
           <option value="archived">Archived</option></select></div>
         <div class="f"><label>Mode</label><select id="fMode">
           <option value="fcfs">First come, first served</option>
-          <option value="raffle">Raffle (draw coming soon)</option></select></div>
+          <option value="raffle">Raffle</option></select></div>
       </div>
       <div class="grid g2">
         <div class="f"><label>Size scale</label><select id="fScale">
@@ -612,9 +612,14 @@
   <!-- RAFFLE -->
   <section class="view" id="v-raffle">
     <h2>Raffle</h2>
-    <p class="sub">Entries come in first. You allocate against real demand, then draw.</p>
+    <p class="sub">Entries come in first, by size only. You decide how many pairs each
+      store gets against real demand, then draw — winners learn their store from the
+      winner email.</p>
     <div class="f" style="max-width:520px"><label>Raffle release</label>
       <select id="rafRel"></select></div>
+    <div class="rowbtns" style="margin-bottom:12px">
+      <button class="btn ghost sm" id="rafCsv">Download entries CSV</button>
+    </div>
     <div class="msg" id="rafMsg"></div>
     <div id="rafBody"></div>
 
@@ -934,10 +939,11 @@ async function paintRaffle() {
   </div>`;
 
   const rows = (st.buckets || []).map(b => `<tr>
-      <td data-l="Store">${esc(b.location)}</td>
       <td data-l="Size"><b>${esc(b.size)}</b></td>
       <td data-l="Entries">${b.entries}</td>
       <td data-l="Pairs">${b.pairs}</td>
+      <td data-l="Stores">${(b.stores || []).length
+        ? b.stores.map(x => `${esc(x.location)} ${x.pairs}`).join("<br>") : "—"}</td>
       <td data-l="Odds" class="${b.pairs === 0 ? "over" : ""}">${
         b.pairs === 0 ? "no pairs — everyone loses"
                       : "1 in " + (b.entries / b.pairs).toFixed(1)}</td>
@@ -957,19 +963,21 @@ async function paintRaffle() {
     </div>`;
   } else if (!closed) {
     action = `<div class="drawbox"><b>Entries are still open</b>
-      <p class="hint">The draw unlocks once the close time passes. Load the pairs
-        per store first — you can see the demand above.</p></div>`;
+      <p class="hint">The draw unlocks once the close time passes. Use the demand above
+        to decide how many pairs of each size go to each store.</p></div>`;
   } else if (pairs === 0) {
     action = `<div class="drawbox"><b>No pairs loaded yet</b>
       <p class="hint">Open this release on the <b>New / Edit release</b> tab and set the
-        quantity for each size at each store. Then come back and draw.</p></div>`;
+        quantity for each size at each store — that's where the winners of that size
+        will be sent. Then come back and draw.</p></div>`;
   } else {
     action = `<div class="drawbox">
       <b>Ready to draw</b>
       <p class="hint">${st.total} entries, ${pairs} pairs${
-        dq > 0 ? `, plus ${dq} that will be disqualified` : ""}. Each store and size is
-        drawn separately, up to the number you loaded. Winners get pickup codes and an
-        email; everyone else is emailed too. This can only be run once.</p>
+        dq > 0 ? `, plus ${dq} that will be disqualified` : ""}. Each size is drawn
+        separately, up to the pairs loaded for it, and each winner is sent to a store
+        with a pair of their size. Winners get a pickup code and an email naming their
+        store; everyone else is emailed too. This can only be run once.</p>
       <div class="rowbtns" style="margin-top:12px">
         <button class="btn" id="rafDraw">Run the draw</button>
       </div>
@@ -978,14 +986,14 @@ async function paintRaffle() {
 
   $("rafBody").innerHTML = steps + dqNote +
     `<div class="card scroll"><table class="stacked bucket">
-       <thead><tr><th>Store</th><th>Size</th><th>Entries</th><th>Pairs</th><th>Odds</th></tr></thead>
-       <tbody>${rows || `<tr><td colspan="5" data-l="" class="empty">No entries yet.</td></tr>`}</tbody>
+       <thead><tr><th>Size</th><th>Entries</th><th>Pairs</th><th>Stores</th><th>Odds</th></tr></thead>
+       <tbody>${rows || `<tr><td colspan="5" data-l="" class="empty">No sizes yet.</td></tr>`}</tbody>
      </table></div>` + action;
 
   const btn = $("rafDraw");
   if (btn) btn.onclick = async () => {
     if (!confirm(`Draw ${st.total} entries for ${pairs} pairs?\n\n` +
-                 `Winners are picked at random per store and size, turned into ` +
+                 `Winners are picked at random per size, given a store, turned into ` +
                  `reservations, and emailed. Everyone else is emailed too.\n\n` +
                  `This cannot be undone or run again.`)) return;
     btn.disabled = true; btn.textContent = "Drawing…";
@@ -1001,6 +1009,50 @@ async function paintRaffle() {
     btn.disabled = false; btn.textContent = "Run the draw";
   };
 }
+
+// Everything staff need to screen for resellers before the draw: who entered,
+// their Instagram, and once drawn, the result and the store they were sent to.
+$("rafCsv").onclick = async () => {
+  const m = $("rafMsg");
+  const rel = state.releases.find(r => r.id === $("rafRel").value);
+  if (!rel) { m.className = "msg err show"; m.textContent = "Choose a raffle release first."; return; }
+  const btn = $("rafCsv"); btn.disabled = true;
+  try {
+    // the API returns at most 1,000 rows per request, so page through
+    let rows = [];
+    for (let off = 0; ; off += 1000) {
+      const page = await rest(`raffle_entries?select=*&release_id=eq.${rel.id}` +
+                              `&order=created_at,id&limit=1000&offset=${off}`);
+      rows = rows.concat(page);
+      if (page.length < 1000) break;
+    }
+    if (!rows.length) { m.className = "msg err show"; m.textContent = `No entries yet for ${rel.name}.`; return; }
+    m.classList.remove("show");
+    const locName = id => (state.locations.find(l => l.id === id) || {}).name || "";
+    // same formula guard as the reservations export — names and handles are typed by customers
+    const q = s => {
+      let v = String(s ?? "");
+      if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
+      return `"${v.replace(/"/g,'""')}"`;
+    };
+    const head = ["Entry code","First","Last","Email","Phone","Instagram","Instagram link",
+                  "Size","Status","Store","Entered at"];
+    const csv = [head.join(",")].concat(rows.map(r => [
+      r.code, r.first_name, r.last_name, r.email, r.phone,
+      r.instagram || "",
+      r.instagram ? "https://instagram.com/" + r.instagram : "",
+      r.size, r.status, locName(r.location_id),
+      new Date(r.created_at).toLocaleString()
+    ].map(q).join(","))).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type:"text/csv" }));
+    const slug = String(rel.slug || rel.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    a.download = `raffle-entries-${slug}-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  } catch (e) {
+    m.className = "msg err show"; m.textContent = "Could not export: " + e.message;
+  } finally { btn.disabled = false; }
+};
 
 $("rafRel").addEventListener("change", () => {
   $("rafMsg").classList.remove("show");
