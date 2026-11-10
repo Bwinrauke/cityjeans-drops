@@ -239,6 +239,7 @@
     font-size:38px; font-weight:900; letter-spacing:.06em; margin:8px 0 18px;
     font-variant-numeric:tabular-nums;
   }
+  .code.entered{font-size:30px; letter-spacing:0}
   #qr{display:flex; justify-content:center; margin-bottom:18px}
   #qr img,#qr canvas{border-radius:8px}
   .tdiv{border-top:2px dashed #ddd; margin:18px -22px; position:relative}
@@ -396,7 +397,7 @@
       <div class="ticket" id="ticket"></div>
       <div class="shot" id="shot">📸 Screenshot this screen — show it to the cashier</div>
       <div class="banner" id="banner"></div>
-      <p class="link">Lost this? Look it up any time with your code and email.<br>
+      <p class="link"><span id="lostLine">Lost this? Look it up any time with your code and email.<br></span>
         <a id="startOver">Back to the release</a></p>
     </section>
 
@@ -814,7 +815,7 @@
     const entry = res.status === "entered" || /^RF-/i.test(res.code || "");
     const badge = res.status === "picked_up"
       ? '<span class="pill done">Picked up</span>'
-      : res.status === "entered" ? '<span class="pill ok">Entered</span>'
+      : res.status === "entered" ? ''
       : res.status === "lost"    ? '<span class="pill dead">Not selected</span>'
       : res.status === "disqualified" ? '<span class="pill dead">Disqualified</span>'
       : (res.status && !["confirmed", undefined].includes(res.status)
@@ -822,9 +823,14 @@
           : '<span class="pill ok">Reserved</span>');
 
     $("ticket").innerHTML = `
-      <div class="lbl">${entry ? "Entry code" : "Confirmation code"}</div>
-      <div class="code">${esc(res.code)}</div>
-      <div id="qr"></div>
+      ${entry
+        // an entry gets no code or QR: only a winner gets a code, in the winner
+        // email, so nothing here can be mistaken for something to bring in
+        ? `<div class="lbl">Raffle entry</div>
+           <div class="code entered">You're entered</div>`
+        : `<div class="lbl">Confirmation code</div>
+           <div class="code">${esc(res.code)}</div>
+           <div id="qr"></div>`}
       ${badge}
       <div class="tdiv"></div>
       <div class="tshoe">${esc(res.release)}</div>
@@ -837,7 +843,9 @@
         ? `<div class="trow"><span class="k">Entries close</span><span class="v">${esc(when(res.closes_at))}</span></div>` : ""}
       ${when(res.pickup_starts_at, res.pickup_ends_at)
         ? `<div class="trow"><span class="k">Pickup window</span><span class="v">${esc(when(res.pickup_starts_at,res.pickup_ends_at))}</span></div>` : ""}`;
-    try {
+    // an entry has no code to look up later; the winner email carries it
+    $("lostLine").style.display = entry ? "none" : "";
+    if (!entry) try {
       new QRCode($("qr"), { text: res.code, width: 148, height: 148,
         colorDark:"#0a0a0a", colorLight:"#ffffff", correctLevel: QRCode.CorrectLevel.M });
     } catch (e) { $("qr").style.display = "none"; }
@@ -862,13 +870,13 @@
           ? `<b>⚠️ You've entered this drop more than once.</b><br>` +
             `${esc(res.duplicate_message || "")}<br><br>`
           : "") +
-        `<b>Results come by email — not text.</b> This is a new system; ` +
-        `we email everyone once the draw runs, win or lose. Check your spam ` +
-        `folder if you don't see it.<br><br>` +
-        `You don't need to check back or keep this open.<br><br>` +
-        (res.location
-          ? `Winners get a pickup code to bring to ${esc(res.location)}. `
-          : `Winners are emailed their pickup store and code. `) +
+        `<b>This is a raffle entry, not a reservation.</b> You don't have a pair ` +
+        `yet, and there's no code to bring to the store.<br><br>` +
+        `<b>If you win, we'll email you.</b> That email has your pickup code, ` +
+        `your store and your pickup day — it's the only thing you need. If you're ` +
+        `not selected, we'll email you that too.<br><br>` +
+        `Results come by email only — not text, not a call. Check your spam folder ` +
+        `after the draw. You don't need to check back or keep this open.<br><br>` +
         `One entry per person — enter twice and every entry is disqualified.`;
     } else {
       $("shot").style.display = "";
