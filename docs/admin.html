@@ -549,6 +549,10 @@
 
     <div class="card">
       <h3 style="margin-top:0">Quantity per size, per store</h3>
+      <p class="hint" id="rafQtyHint" style="display:none; margin-bottom:12px"><b>Raffle:</b>
+        nothing to set up here yet. Customers can enter in any size from the standard run.
+        Once entries close, check demand on the Raffle tab, then come back and set the
+        pairs for each size at each store before you draw.</p>
       <div class="f"><label>Sizes in this run</label>
         <div class="chips" id="sizeChips"></div>
         <div class="rowbtns" style="margin-top:11px">
@@ -1053,6 +1057,10 @@ $("rafCsv").onclick = async () => {
     m.className = "msg err show"; m.textContent = "Could not export: " + e.message;
   } finally { btn.disabled = false; }
 };
+
+$("fMode").addEventListener("change", () => {
+  $("rafQtyHint").style.display = $("fMode").value === "raffle" ? "" : "none";
+});
 
 $("rafRel").addEventListener("change", () => {
   $("rafMsg").classList.remove("show");
@@ -1589,6 +1597,7 @@ async function editRelease(rel) {
   g("fDesc", rel?.description); g("fNote", rel?.pickup_note); g("fPhoto", rel?.photo_url);
   $("fStatus").value = rel?.status || "draft";
   $("fMode").value = rel?.mode || "fcfs";
+  $("rafQtyHint").style.display = $("fMode").value === "raffle" ? "" : "none";
   $("fScale").value = rel?.size_scale || "mens";
   g("fOpens", dtLocal(rel?.opens_at)); g("fCloses", dtLocal(rel?.closes_at));
   g("fPuS", dtLocal(rel?.pickup_starts_at)); g("fPuE", dtLocal(rel?.pickup_ends_at));

@@ -542,8 +542,20 @@
   // ── availability helpers ────────────────────────────────────
   // The server tells us only whether a size can still be reserved, never how many.
   const left = r => (r.available ? 1 : 0);
+  // Kept in step with SIZE_RUNS in admin.html and public.size_run(). A raffle
+  // takes entries before any sizes are set up, so it offers the whole run.
+  const SIZE_RUNS = {
+    mens:   ["7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","12.5","13","14","15"],
+    womens: ["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","12"],
+    gs:     ["3.5Y","4Y","4.5Y","5Y","5.5Y","6Y","6.5Y","7Y"],
+    ps:     ["10.5C","11C","11.5C","12C","12.5C","13C","13.5C","1Y","2Y","3Y"],
+    td:     ["2C","3C","4C","5C","6C","7C","8C","9C","10C"],
+    unisex: ["4","5","6","7","8","9","10","11","12","13"]
+  };
   const sizeList = () => {
     const m = new Map();
+    if (isRaffle()) (SIZE_RUNS[S.release.size_scale] || SIZE_RUNS.mens)
+      .forEach((sz, i) => m.set(sz, { size:sz, order:i - 1000, n:1 }));
     S.inv.forEach(r => {
       const e = m.get(r.size) || { size:r.size, order:Number(r.size_order) || 0, n:0 };
       e.n += left(r); m.set(r.size, e);
