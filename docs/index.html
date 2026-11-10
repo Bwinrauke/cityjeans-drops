@@ -811,6 +811,15 @@
          penalty.<br><br>${consent}`;
   }
 
+  // Directions link from the store locator on cityjeans.com, falling back to the
+  // address; the ticket only carries the store's name
+  function mapsUrl(name) {
+    const l = S.locations.find(x => x.name === name);
+    if (!l) return "";
+    return l.maps_url || (l.address
+      ? "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(l.address) : "");
+  }
+
   function paintTicket(res) {
     const entry = res.status === "entered" || /^RF-/i.test(res.code || "");
     const badge = res.status === "picked_up"
@@ -835,7 +844,10 @@
       <div class="tdiv"></div>
       <div class="tshoe">${esc(res.release)}</div>
       <div class="trow"><span class="k">Size</span><span class="v">${esc(SCALE_TAG[res.size_scale] || "US")} ${esc(res.size)}</span></div>
-      ${res.location ? `<div class="trow"><span class="k">${entry ? "Collect at if you win" : "Pick up at"}</span><span class="v">${esc(res.location)}</span></div>` : ""}
+      ${res.location ? `<div class="trow"><span class="k">${entry ? "Collect at if you win" : "Pick up at"}</span><span class="v">${
+        mapsUrl(res.location)
+          ? `<a href="${esc(mapsUrl(res.location))}" target="_blank" rel="noopener">${esc(res.location)} ↗</a>`
+          : esc(res.location)}</span></div>` : ""}
       ${res.instagram ? `<div class="trow"><span class="k">Instagram</span><span class="v">@${esc(res.instagram)}</span></div>` : ""}
       <div class="trow"><span class="k">Name</span><span class="v">${esc(res.first_name)} ${esc(res.last_name)}</span></div>
       ${res.retail_price != null ? `<div class="trow"><span class="k">Price</span><span class="v">${money(res.retail_price)}</span></div>` : ""}
@@ -885,6 +897,9 @@
         `<b>Bring this to the register.</b> Show the code or let the cashier scan it.` +
         `${res.pickup_note ? "<br>" + esc(res.pickup_note) : ""}` +
         `<br><br>Collect at <b>${esc(res.location)}</b> — a pair is held there and only there.` +
+        (mapsUrl(res.location)
+          ? ` <a href="${esc(mapsUrl(res.location))}" target="_blank" rel="noopener">Get directions</a>`
+          : "") +
         `<br><br>A confirmation email is on its way.`;
     }
   }
