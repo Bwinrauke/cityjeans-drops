@@ -178,6 +178,8 @@
     border-radius:11px; padding:14px 15px; color:var(--text); font:inherit; font-size:16px;
   }
   input:focus{outline:none; border-color:var(--accent)}
+  input.bad{border-color:#ff5c5c}
+  label .req{color:#ff8a8a; margin-left:2px}
   .row{display:grid; grid-template-columns:1fr 1fr; gap:10px}
   .fine{color:var(--muted); font-size:12px; margin:18px 0 0; line-height:1.5}
 
@@ -369,22 +371,22 @@
     <!-- 3. details -->
     <section class="screen" id="s-info">
       <h2 style="margin-top:20px">Your details</h2>
-      <p class="sub">We'll send your confirmation here.</p>
+      <p class="sub">We'll send your confirmation here. Every field is required.</p>
       <div class="recap" id="recap"></div>
       <div class="row">
-        <div><label for="fn">First name</label>
-          <input id="fn" autocomplete="given-name" enterkeyhint="next"></div>
-        <div><label for="ln">Last name</label>
-          <input id="ln" autocomplete="family-name" enterkeyhint="next"></div>
+        <div><label for="fn">First name<span class="req" aria-hidden="true">*</span></label>
+          <input id="fn" required autocomplete="given-name" enterkeyhint="next"></div>
+        <div><label for="ln">Last name<span class="req" aria-hidden="true">*</span></label>
+          <input id="ln" required autocomplete="family-name" enterkeyhint="next"></div>
       </div>
-      <label for="em">Email</label>
-      <input id="em" type="email" inputmode="email" autocomplete="email"
+      <label for="em">Email<span class="req" aria-hidden="true">*</span></label>
+      <input id="em" required type="email" inputmode="email" autocomplete="email"
              autocapitalize="off" spellcheck="false" enterkeyhint="next" placeholder="you@email.com">
-      <label for="ph">Mobile number</label>
-      <input id="ph" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="done" placeholder="(555) 123-4567">
+      <label for="ph">Mobile number<span class="req" aria-hidden="true">*</span></label>
+      <input id="ph" required type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="done" placeholder="(555) 123-4567">
       <div id="igRow" style="display:none">
-        <label for="ig">Instagram handle</label>
-        <input id="ig" autocapitalize="off" autocorrect="off" spellcheck="false"
+        <label for="ig">Instagram handle<span class="req" aria-hidden="true">*</span></label>
+        <input id="ig" required autocapitalize="off" autocorrect="off" spellcheck="false"
                enterkeyhint="done" placeholder="@yourhandle">
       </div>
       <div id="rulesBox"></div>
@@ -937,7 +939,14 @@
 
     if (cur === "s-info") {
       const btn = $("cta"), e = $("err");
-      e.classList.remove("show"); btn.disabled = true;
+      e.classList.remove("show");
+      const missing = missingFields();
+      if (missing.length) {
+        e.textContent = "Please fill in every field: " + missing.join(", ") + ".";
+        e.classList.add("show");
+        return;
+      }
+      btn.disabled = true;
       btn.textContent = isRaffle() ? "Entering…" : "Reserving…";
       try {
         const args = {
@@ -979,6 +988,32 @@
       btn.textContent = isRaffle() ? "Enter the raffle" : "Confirm reservation";
     }
   };
+
+  // Every field on the details screen is required. Checked here so a blank
+  // never leaves the page; the database functions check the same things.
+  function missingFields() {
+    const checks = [
+      ["fn", "first name",  v => v.trim() !== ""],
+      ["ln", "last name",   v => v.trim() !== ""],
+      ["em", "email",       v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim())],
+      ["ph", "mobile number", v => v.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "").length === 10],
+    ];
+    if (isRaffle()) checks.push(["ig", "Instagram handle", v => v.replace(/^@+/, "").trim() !== ""]);
+    const out = [];
+    let first = null;
+    for (const [id, name, ok] of checks) {
+      const el = $(id), good = ok(el.value);
+      el.classList.toggle("bad", !good);
+      if (!good) { out.push(name); first = first || el; }
+    }
+    if (isRaffle() && !S.size) out.push("size");
+    if (!isRaffle() && (!S.size || !S.loc)) out.push(!S.size ? "size" : "pickup location");
+    if (isRaffle() && $("agree") && !$("agree").checked) out.push("agree to the raffle rules");
+    if (first) first.focus();
+    return out;
+  }
+  ["fn","ln","em","ph","ig"].forEach(id =>
+    $(id).addEventListener("input", () => $(id).classList.remove("bad")));
 
   // phone auto-format
   $("ph").addEventListener("input", ev => {
