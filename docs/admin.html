@@ -959,7 +959,8 @@ async function paintRaffle() {
     action = `<div class="drawbox">
       <b>Drawn ${esc(new Date(d.ran_at).toLocaleString())}</b>
       <p class="hint">${d.winners} winners from ${d.entries} entries; ${d.losers} not selected${
-        st.disqualified ? `; ${st.disqualified} disqualified for multiple entries` : ""}.
+        st.disqualified ? `; ${st.disqualified} disqualified for multiple entries` : ""}${
+        st.excluded_ever ? `; ${st.excluded_ever} screened out from your list (counted as not selected)` : ""}.
         Winners became ordinary reservations with pickup codes and have been emailed.</p>
       <p class="hint" style="margin-top:10px">Verification seed — keep this. With it and the
         entry list, the exact winners can be recomputed by anyone:</p>
@@ -978,7 +979,8 @@ async function paintRaffle() {
     action = `<div class="drawbox">
       <b>Ready to draw</b>
       <p class="hint">${st.total} entries, ${pairs} pairs${
-        dq > 0 ? `, plus ${dq} that will be disqualified` : ""}. Each size is drawn
+        dq > 0 ? `, plus ${dq} that will be disqualified` : ""}${
+        st.excluded ? `, plus ${st.excluded} screened out (they get the "not selected" email)` : ""}. Each size is drawn
         separately, up to the pairs loaded for it, and each winner is sent to a store
         with a pair of their size. Winners get a pickup code and an email naming their
         store; everyone else is emailed too. This can only be run once.</p>
@@ -988,11 +990,14 @@ async function paintRaffle() {
     </div>`;
   }
 
+  const screen = (!st.drawn && canManage()) || st.excluded_ever
+    ? `<div id="rafScreen"></div>` : "";
   $("rafBody").innerHTML = steps + dqNote +
     `<div class="card scroll"><table class="stacked bucket">
        <thead><tr><th>Size</th><th>Entries</th><th>Pairs</th><th>Stores</th><th>Odds</th></tr></thead>
        <tbody>${rows || `<tr><td colspan="5" data-l="" class="empty">No sizes yet.</td></tr>`}</tbody>
-     </table></div>` + action;
+     </table></div>` + screen + action;
+  if (screen) paintScreen(id, rel, st);
 
   const btn = $("rafDraw");
   if (btn) btn.onclick = async () => {
@@ -1012,6 +1017,244 @@ async function paintRaffle() {
     }
     btn.disabled = false; btn.textContent = "Run the draw";
   };
+}
+
+// ── raffle screen-out list ────────────────────────────────────
+// The manager uploads a CSV of people to keep out of the draw (resellers,
+// people banned in store). Rows are matched to entries by phone, Instagram,
+// email, entry code or full name, shown for review, and only the ticked ones
+// are screened out. Screened-out entries are skipped by the draw and get the
+// ordinary "not selected" email, so nothing tells them they were flagged.
+const scr = { rel: null, matches: [], unmatched: [], already: 0, file: "" };
+
+async function allEntries(relId, extra = "") {
+  let rows = [];
+  for (let off = 0; ; off += 1000) {
+    const page = await rest(`raffle_entries?select=*&release_id=eq.${relId}${extra}` +
+                            `&order=created_at,id&limit=1000&offset=${off}`);
+    rows = rows.concat(page);
+    if (page.length < 1000) break;
+  }
+  return rows;
+}
+
+// RFC 4180: quoted fields, doubled quotes, commas and newlines inside quotes
+function parseCsv(text) {
+  text = String(text).replace(/^﻿/, "");
+  const delim = (text.split(/\r?\n/)[0].match(/\t/g) || []).length >
+                (text.split(/\r?\n/)[0].match(/,/g) || []).length ? "\t" : ",";
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === delim) { row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(f); rows.push(row); row = []; f = "";
+    } else f += c;
+  }
+  if (f !== "" || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(x => x.trim() !== ""));
+}
+
+const nPhone = s => { const d = String(s || "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : ""; };
+const nIg = s => String(s || "").trim().replace(/^'/, "")
+  .replace(/^(https?:\/\/)?(www\.)?instagram\.com\//i, "").replace(/^@+/, "")
+  .replace(/[/?].*$/, "").toLowerCase();
+const nEmail = s => { const v = String(s || "").trim().replace(/^'/, "").toLowerCase(); return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? v : ""; };
+const nName = s => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "")
+  .toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+const nCode = s => String(s || "").trim().toUpperCase();
+
+// Which column holds what. Headers decide when there are any; otherwise each
+// cell is judged by what it looks like.
+function csvPeople(rows) {
+  const h = (rows[0] || []).map(x => x.trim().toLowerCase());
+  const find = re => h.findIndex(x => re.test(x));
+  let col = {
+    code:  find(/code/),
+    email: find(/e-?mail/),
+    phone: find(/phone|mobile|cell|tel/),
+    ig:    find(/insta|^ig\b|handle|user ?name/),
+    first: find(/first|given/),
+    last:  find(/last|surname|family/),
+  };
+  col.name = h.findIndex((x, i) => /name/.test(x) && i !== col.first && i !== col.last && i !== col.ig);
+  const hasHeader = Object.values(col).some(i => i >= 0);
+  const body = hasHeader ? rows.slice(1) : rows;
+  return body.map((r, i) => {
+    const p = { line: i + (hasHeader ? 2 : 1), raw: r.join(", ").slice(0, 120),
+                phone: "", ig: "", email: "", name: "", code: "" };
+    if (hasHeader) {
+      const g = k => col[k] >= 0 ? (r[col[k]] || "") : "";
+      p.phone = nPhone(g("phone")); p.email = nEmail(g("email")); p.code = nCode(g("code"));
+      p.ig = /^[a-z0-9._]{1,30}$/.test(nIg(g("ig"))) ? nIg(g("ig")) : "";
+      p.name = nName(col.first >= 0 || col.last >= 0 ? g("first") + " " + g("last") : g("name"));
+      // the entries export has both "Instagram" and "Instagram link"; either will do
+      if (!p.ig) h.forEach((x, j) => { if (!p.ig && /insta/.test(x) && /^[a-z0-9._]{1,30}$/.test(nIg(r[j]))) p.ig = nIg(r[j]); });
+    } else {
+      const words = [];
+      r.forEach(c => {
+        const v = c.trim(); if (!v) return;
+        if (/^RF-/i.test(v)) p.code = nCode(v);
+        else if (nEmail(v)) p.email = nEmail(v);
+        else if (/^@|instagram\.com\//i.test(v)) p.ig = nIg(v);
+        else if (nPhone(v) && /^[\d\s()+.\-]+$/.test(v)) p.phone = nPhone(v);
+        else words.push(v);
+      });
+      p.name = nName(words.join(" "));
+    }
+    // one word is too loose to call a person
+    if (p.name.split(" ").length < 2) p.name = "";
+    return p;
+  });
+}
+
+function matchPeople(people, entries) {
+  const idx = { phone: new Map(), ig: new Map(), email: new Map(), name: new Map(), code: new Map() };
+  const add = (m, k, e) => { if (!k) return; if (!m.has(k)) m.set(k, []); m.get(k).push(e); };
+  entries.forEach(e => {
+    add(idx.phone, nPhone(e.phone_norm || e.phone), e);
+    add(idx.ig, nIg(e.instagram), e);
+    add(idx.email, nEmail(e.email_norm || e.email), e);
+    add(idx.name, nName(e.first_name + " " + e.last_name), e);
+    add(idx.code, nCode(e.code), e);
+  });
+  const LABEL = { phone: "phone", ig: "Instagram", email: "email", name: "name", code: "entry code" };
+  const hits = new Map(); const unmatched = [];
+  people.forEach(p => {
+    let any = false;
+    for (const k of ["phone", "ig", "email", "code", "name"]) {
+      (idx[k].get(p[k]) || []).forEach(e => {
+        any = true;
+        if (!hits.has(e.id)) hits.set(e.id, { e, on: new Set(), lines: new Set() });
+        hits.get(e.id).on.add(LABEL[k]); hits.get(e.id).lines.add(p.line);
+      });
+    }
+    if (!any) unmatched.push(p);
+  });
+  const out = [...hits.values()].map(h => ({ ...h,
+    strong: [...h.on].some(x => x !== "name"), pick: [...h.on].some(x => x !== "name") }));
+  out.sort((a, b) => (b.strong - a.strong) || a.e.last_name.localeCompare(b.e.last_name));
+  return { matches: out, unmatched };
+}
+
+async function paintScreen(id, rel, st) {
+  const box = $("rafScreen"); if (!box) return;
+  if (scr.rel !== id) Object.assign(scr, { rel: id, matches: [], unmatched: [], already: 0, file: "" });
+  let out = [];
+  try { out = await allEntries(id, "&excluded_at=not.is.null"); } catch {}
+  if ($("rafRel").value !== id || !$("rafScreen")) return;
+  const editable = !st.drawn && canManage();
+
+  const outRows = out.map(e => `<tr>
+      <td data-l="Name"><b>${esc(e.first_name)} ${esc(e.last_name)}</b></td>
+      <td data-l="Phone">${esc(e.phone)}</td>
+      <td data-l="Instagram">${e.instagram ? "@" + esc(e.instagram) : "—"}</td>
+      <td data-l="Size">${esc(e.size)}</td>
+      <td data-l="Why">${esc(e.excluded_reason || "")}</td>
+      ${editable ? `<td data-l=""><button class="btn ghost sm" data-back="${e.id}">Put back</button></td>` : ""}
+    </tr>`).join("");
+
+  let review = "";
+  if (editable && scr.file) {
+    const m = scr.matches, n = m.filter(x => x.pick).length;
+    const mrows = m.map((x, i) => `<tr>
+        <td data-l=""><input type="checkbox" data-pick="${i}" ${x.pick ? "checked" : ""}></td>
+        <td data-l="Name"><b>${esc(x.e.first_name)} ${esc(x.e.last_name)}</b></td>
+        <td data-l="Phone">${esc(x.e.phone)}</td>
+        <td data-l="Instagram">${x.e.instagram ? `<a href="https://instagram.com/${encodeURIComponent(x.e.instagram)}" target="_blank" rel="noopener">@${esc(x.e.instagram)}</a>` : "—"}</td>
+        <td data-l="Size">${esc(x.e.size)}</td>
+        <td data-l="Matched on">${esc([...x.on].join(", "))}${x.strong ? "" :
+          ` <span class="pill p-draft">name only, check</span>`}</td>
+        <td data-l="List row">${[...x.lines].slice(0, 4).join(", ")}</td>
+      </tr>`).join("");
+    review = `<div class="drawbox">
+      <b>${esc(scr.file)}: ${m.length} matching entr${m.length === 1 ? "y" : "ies"}</b>
+      <p class="hint">Phone, Instagram, email and entry-code matches are ticked. Name-only
+        matches are not, because two people can share a name; tick the ones you're sure of.
+        ${scr.already ? `${scr.already} row${scr.already === 1 ? " is" : "s are"} already screened out. ` : ""}
+        ${scr.unmatched.length ? `${scr.unmatched.length} row${scr.unmatched.length === 1 ? "" : "s"} matched nobody in this raffle.` : ""}</p>
+      ${m.length ? `<div class="card scroll" style="margin-top:10px"><table class="stacked">
+        <thead><tr><th><input type="checkbox" id="scrAll" ${n === m.length ? "checked" : ""}></th>
+          <th>Name</th><th>Phone</th><th>Instagram</th><th>Size</th><th>Matched on</th><th>List row</th></tr></thead>
+        <tbody>${mrows}</tbody></table></div>` : ""}
+      ${scr.unmatched.length ? `<details style="margin-top:10px"><summary class="hint">Rows that matched nobody</summary>
+        <p class="hint">${scr.unmatched.slice(0, 200).map(p => `Row ${p.line}: ${esc(p.raw)}`).join("<br>")}${
+          scr.unmatched.length > 200 ? "<br>…" : ""}</p></details>` : ""}
+      <div class="rowbtns" style="margin-top:12px">
+        ${m.length ? `<button class="btn" id="scrGo" ${n ? "" : "disabled"}>Screen out ${n} selected</button>` : ""}
+        <button class="btn ghost sm" id="scrClear">Clear</button>
+      </div></div>`;
+  }
+
+  box.innerHTML = `<div class="drawbox">
+      <b>Screen out people before the draw${out.length ? ` · ${out.length} screened out` : ""}</b>
+      ${editable ? `<p class="hint">Upload a CSV of people who shouldn't win: resellers,
+        people banned in store. Any columns work; phone, name, Instagram, email or entry
+        code are matched (phone by digits, name and handle ignoring case, spaces and @).
+        You review the matches before anything changes. Screened-out entries are skipped
+        by the draw and get the ordinary "not selected" email.</p>
+      <div class="rowbtns" style="margin-top:10px">
+        <label class="btn ghost sm" style="cursor:pointer">Upload screen-out CSV
+          <input type="file" id="scrFile" accept=".csv,.tsv,.txt,text/csv" style="display:none"></label>
+      </div>` : `<p class="hint">These entries were kept out of the draw and counted as not selected.</p>`}
+    </div>` + review +
+    (out.length ? `<div class="card scroll" style="margin-top:10px"><table class="stacked">
+      <thead><tr><th>Screened out</th><th>Phone</th><th>Instagram</th><th>Size</th><th>Why</th>${editable ? "<th></th>" : ""}</tr></thead>
+      <tbody>${outRows}</tbody></table></div>` : "");
+
+  const msg = (ok, t) => { const m = $("rafMsg"); m.className = "msg " + (ok ? "ok" : "err") + " show"; m.textContent = t; };
+  const f = $("scrFile");
+  if (f) f.onchange = async () => {
+    const file = f.files[0]; if (!file) return;
+    try {
+      const people = csvPeople(parseCsv(await file.text()));
+      if (!people.length) { msg(false, "That file has no rows."); return; }
+      const ents = await allEntries(id, "&status=eq.entered");
+      const live = ents.filter(e => !e.excluded_at);
+      const r = matchPeople(people, live);
+      const done = matchPeople(people, ents.filter(e => e.excluded_at));
+      Object.assign(scr, { rel: id, file: file.name, matches: r.matches,
+        unmatched: r.unmatched.filter(p => !done.matches.some(x => x.lines.has(p.line))),
+        already: done.matches.length });
+      $("rafMsg").classList.remove("show");
+      paintScreen(id, rel, st);
+    } catch (e) { msg(false, "Could not read that file: " + e.message); }
+  };
+  box.querySelectorAll("[data-pick]").forEach(c => c.onchange = () => {
+    scr.matches[+c.dataset.pick].pick = c.checked; paintScreen(id, rel, st);
+  });
+  if ($("scrAll")) $("scrAll").onchange = e => {
+    scr.matches.forEach(x => x.pick = e.target.checked); paintScreen(id, rel, st);
+  };
+  if ($("scrClear")) $("scrClear").onclick = () => { scr.file = ""; scr.matches = []; scr.unmatched = []; paintScreen(id, rel, st); };
+  if ($("scrGo")) $("scrGo").onclick = async () => {
+    const ids = scr.matches.filter(x => x.pick).map(x => x.e.id);
+    if (!ids.length) return;
+    if (!confirm(`Screen out ${ids.length} entr${ids.length === 1 ? "y" : "ies"} from ${rel.name}?\n\n` +
+                 `They will be skipped by the draw and get the ordinary "not selected" email. ` +
+                 `Nothing is sent now, and you can put them back until the draw runs.`)) return;
+    $("scrGo").disabled = true;
+    try {
+      const r = await rpc("raffle_exclude_entries", { p_release_id: id, p_ids: ids,
+        p_reason: "List: " + scr.file });
+      msg(r.ok, r.message || r.error);
+      if (r.ok) { scr.file = ""; scr.matches = []; await paintRaffle(); }
+      else $("scrGo").disabled = false;
+    } catch (e) { msg(false, "Could not screen out: " + e.message); $("scrGo").disabled = false; }
+  };
+  box.querySelectorAll("[data-back]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const r = await rpc("raffle_unexclude_entries", { p_release_id: id, p_ids: [b.dataset.back] });
+      msg(r.ok, r.message || r.error);
+      if (r.ok) await paintRaffle(); else b.disabled = false;
+    } catch (e) { msg(false, "Could not put back: " + e.message); b.disabled = false; }
+  });
 }
 
 // Everything staff need to screen for resellers before the draw: who entered,
@@ -1040,12 +1283,12 @@ $("rafCsv").onclick = async () => {
       return `"${v.replace(/"/g,'""')}"`;
     };
     const head = ["Entry code","First","Last","Email","Phone","Instagram","Instagram link",
-                  "Size","Status","Store","Entered at"];
+                  "Size","Status","Screened out","Store","Entered at"];
     const csv = [head.join(",")].concat(rows.map(r => [
       r.code, r.first_name, r.last_name, r.email, r.phone,
       r.instagram || "",
       r.instagram ? "https://instagram.com/" + r.instagram : "",
-      r.size, r.status, locName(r.location_id),
+      r.size, r.status, r.excluded_at ? (r.excluded_reason || "yes") : "", locName(r.location_id),
       new Date(r.created_at).toLocaleString()
     ].map(q).join(","))).join("\n");
     const a = document.createElement("a");
