@@ -2,9 +2,8 @@
 -- size, guaranteed entries take the pairs first (in random order among
 -- themselves if there are more of them than pairs); the remaining pairs are
 -- drawn at random from everyone else, exactly as before. Guaranteeing an entry
--- clears any screen-out on it and screening out clears a guarantee. A
--- guaranteed entry also survives the one-person-one-entry rule (the person's
--- other entries are still removed).
+-- clears any screen-out on it and screening out clears a guarantee. The
+-- one-person-one-entry rule is unchanged and applies to guaranteed entries too.
 
 alter table public.raffle_entries add column if not exists guaranteed_at timestamptz;
 alter table public.raffle_entries add column if not exists guaranteed_by uuid;
@@ -45,26 +44,6 @@ $$;
 revoke execute on function public.raffle_guarantee_entries(uuid, uuid[], boolean) from public, anon;
 grant execute on function public.raffle_guarantee_entries(uuid, uuid[], boolean) to authenticated;
 
--- One person, one entry now looks only at entries still in the draw. When the
--- manager has screened out someone's extra entries, the one left counts as
--- their single entry instead of disqualifying them.
-create or replace function public.raffle_duplicate_entries(p_release_id uuid)
-returns table(id uuid)
-language sql stable security definer set search_path = public, pg_temp
-as $$
-  select e.id
-    from public.raffle_entries e
-   where e.release_id = p_release_id
-     and e.status = 'entered' and e.excluded_at is null
-     and exists (
-       select 1 from public.raffle_entries o
-        where o.release_id = e.release_id
-          and o.id <> e.id
-          and o.status = 'entered' and o.excluded_at is null
-          and (o.email_norm = e.email_norm or o.phone_norm = e.phone_norm
-               or (o.instagram is not null and o.instagram = e.instagram)));
-$$;
-
 -- screening an entry out takes back any guarantee on it
 create or replace function public.raffle_exclude_entries(
   p_release_id uuid, p_ids uuid[], p_reason text default null)
@@ -104,11 +83,8 @@ begin
   if not public.is_admin() then
     return jsonb_build_object('ok', false, 'error', 'forbidden');
   end if;
-  -- a guaranteed entry is kept at the draw even if the person entered twice
-  select coalesce(array_agg(d.id), '{}') into v_dupes
-    from public.raffle_duplicate_entries(p_release_id) d
-    join public.raffle_entries e on e.id = d.id
-   where e.guaranteed_at is null;
+  select coalesce(array_agg(id), '{}') into v_dupes
+    from public.raffle_duplicate_entries(p_release_id);
   select public.size_run(size_scale) into v_run from public.releases where id = p_release_id;
 
   select jsonb_build_object(
@@ -223,8 +199,7 @@ begin
   -- one person, one entry: every entry of anyone holding more than one is out
   update public.raffle_entries e
      set status = 'disqualified', drawn_at = now(), draw_id = v_draw_id
-   where e.id in (select id from public.raffle_duplicate_entries(p_release_id))
-     and e.guaranteed_at is null;  -- a guaranteed entry is kept; the person's others go
+   where e.id in (select id from public.raffle_duplicate_entries(p_release_id));
   get diagnostics v_dq = row_count;
 
   -- entries the manager screened out before the draw are passed over
@@ -366,6 +341,22 @@ begin
   v_def := pg_get_functiondef('public.render_notification(uuid)'::regprocedure);
   if position(v_old in v_def) = 0 then
     raise exception 'raffle_lost wording not found; render_notification changed';
+  end if;
+  execute replace(v_def, v_old, v_new);
+end
+$m$;
+
+-- Winners are told the pair is final sale, store-bound and size-bound.
+do $m$
+declare v_def text;
+  v_old text := $t$         || E'\n\n' || 'Please share it on your story and tag us @cityjeanspremium!!';$t$;
+  v_new text := $t$         || E'\n\n' || 'This is a final sale item. You can only buy it at your assigned '
+         || 'store, and only in the size you won.'
+         || E'\n\n' || 'Please share it on your story and tag us @cityjeanspremium!!';$t$;
+begin
+  v_def := pg_get_functiondef('public.render_notification(uuid)'::regprocedure);
+  if position(v_old in v_def) = 0 then
+    raise exception 'raffle_won wording not found; render_notification changed';
   end if;
   execute replace(v_def, v_old, v_new);
 end
