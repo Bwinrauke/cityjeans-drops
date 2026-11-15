@@ -942,16 +942,20 @@ async function paintRaffle() {
     <div class="${cls(4)}"><b>4 · Draw</b><span>${st.drawn ? "done" : "not yet"}</span></div>
   </div>`;
 
-  const rows = (st.buckets || []).map(b => `<tr>
+  const gbs = st.guaranteed_by_size || {};
+  const rows = (st.buckets || []).map(b => { const g = gbs[b.size] || 0; return `<tr>
       <td data-l="Size"><b>${esc(b.size)}</b></td>
       <td data-l="Entries">${b.entries}</td>
+      <td data-l="Guaranteed" class="${g > b.pairs ? "over" : ""}">${g ? g + (g > b.pairs ? ` (only ${b.pairs} pairs)` : "") : "—"}</td>
       <td data-l="Pairs">${b.pairs}</td>
       <td data-l="Stores">${(b.stores || []).length
         ? b.stores.map(x => `${esc(x.location)} ${x.pairs}`).join("<br>") : "—"}</td>
       <td data-l="Odds" class="${b.pairs === 0 ? "over" : ""}">${
         b.pairs === 0 ? "no pairs — everyone loses"
+                      : g >= b.pairs ? "guaranteed only"
+                      : g ? `${b.pairs - g} pairs left, 1 in ${((b.entries - g) / (b.pairs - g)).toFixed(1)}`
                       : "1 in " + (b.entries / b.pairs).toFixed(1)}</td>
-    </tr>`).join("");
+    </tr>`; }).join("");
 
   let action;
   if (st.drawn) {
@@ -994,8 +998,8 @@ async function paintRaffle() {
     ? `<div id="rafScreen"></div>` : "";
   $("rafBody").innerHTML = steps + dqNote +
     `<div class="card scroll"><table class="stacked bucket">
-       <thead><tr><th>Size</th><th>Entries</th><th>Pairs</th><th>Stores</th><th>Odds</th></tr></thead>
-       <tbody>${rows || `<tr><td colspan="5" data-l="" class="empty">No sizes yet.</td></tr>`}</tbody>
+       <thead><tr><th>Size</th><th>Entries</th><th>Guaranteed</th><th>Pairs</th><th>Stores</th><th>Odds</th></tr></thead>
+       <tbody>${rows || `<tr><td colspan="6" data-l="" class="empty">No sizes yet.</td></tr>`}</tbody>
      </table></div>` + screen + action;
   if (screen) paintScreen(id, rel, st);
 
@@ -1186,20 +1190,23 @@ async function paintScreen(id, rel, st) {
         <p class="hint">${scr.unmatched.slice(0, 200).map(p => `Row ${p.line}: ${esc(p.raw)}`).join("<br>")}${
           scr.unmatched.length > 200 ? "<br>…" : ""}</p></details>` : ""}
       <div class="rowbtns" style="margin-top:12px">
-        ${m.length ? `<button class="btn" id="scrGo" ${n ? "" : "disabled"}>Screen out ${n} selected</button>` : ""}
+        ${m.length ? `<button class="btn" id="scrGo" ${n ? "" : "disabled"}>Screen out ${n} selected</button>
+          <button class="btn ghost" id="scrWin" ${n ? "" : "disabled"}>Guarantee ${n} selected win</button>` : ""}
+        ${scr.notOn ? `<button class="btn ghost" id="scrRest">Screen out the ${scr.notOn} not on this list</button>` : ""}
         <button class="btn ghost sm" id="scrClear">Clear</button>
       </div></div>`;
   }
 
   box.innerHTML = `<div class="drawbox">
-      <b>Screen out people before the draw${out.length ? ` · ${out.length} screened out` : ""}</b>
-      ${editable ? `<p class="hint">Upload a CSV of people who shouldn't win: resellers,
-        people banned in store. Any columns work; phone, name, Instagram, email or entry
+      <b>Screen out or guarantee people before the draw${out.length ? ` · ${out.length} screened out` : ""}${st.guaranteed ? ` · ${st.guaranteed} guaranteed` : ""}</b>
+      ${editable ? `<p class="hint">Upload a CSV of people, then screen them out (resellers,
+        people banned in store) or guarantee them a pair. You can also screen out everyone
+        who is not on the list. Any columns work; phone, name, Instagram, email or entry
         code are matched (phone by digits, name and handle ignoring case, spaces and @).
         You review the matches before anything changes. Screened-out entries are skipped
         by the draw and get the ordinary "not selected" email.</p>
       <div class="rowbtns" style="margin-top:10px">
-        <label class="btn ghost sm" style="cursor:pointer">Upload screen-out CSV
+        <label class="btn ghost sm" style="cursor:pointer">Upload a list (CSV)
           <input type="file" id="scrFile" accept=".csv,.tsv,.txt,text/csv" style="display:none"></label>
       </div>` : `<p class="hint">These entries were kept out of the draw and counted as not selected.</p>`}
     </div>` + review +
@@ -1218,6 +1225,9 @@ async function paintScreen(id, rel, st) {
       const live = ents.filter(e => !e.excluded_at);
       const r = matchPeople(people, live);
       const done = matchPeople(people, ents.filter(e => e.excluded_at));
+      const hit = new Set(matchPeople(people, ents).matches.map(x => x.e.id));
+      scr.notOnIds = live.filter(e => !hit.has(e.id)).map(e => e.id);
+      scr.notOn = scr.notOnIds.length;
       Object.assign(scr, { rel: id, file: file.name, matches: r.matches,
         unmatched: r.unmatched.filter(p => !done.matches.some(x => x.lines.has(p.line))),
         already: done.matches.length });
@@ -1231,7 +1241,32 @@ async function paintScreen(id, rel, st) {
   if ($("scrAll")) $("scrAll").onchange = e => {
     scr.matches.forEach(x => x.pick = e.target.checked); paintScreen(id, rel, st);
   };
-  if ($("scrClear")) $("scrClear").onclick = () => { scr.file = ""; scr.matches = []; scr.unmatched = []; paintScreen(id, rel, st); };
+  if ($("scrClear")) $("scrClear").onclick = () => { scr.file = ""; scr.matches = []; scr.unmatched = []; scr.notOn = 0; paintScreen(id, rel, st); };
+  if ($("scrWin")) $("scrWin").onclick = async () => {
+    const ids = scr.matches.filter(x => x.pick).map(x => x.e.id);
+    if (!ids.length || !confirm(`Guarantee ${ids.length} entr${ids.length === 1 ? "y" : "ies"} a pair?\n\n` +
+        `They take the pairs in their size first. If a size has more guaranteed entries than ` +
+        `pairs, the pairs go at random among them. You can undo this until the draw runs.`)) return;
+    $("scrWin").disabled = true;
+    try {
+      const r = await rpc("raffle_guarantee_entries", { p_release_id: id, p_ids: ids, p_on: true });
+      msg(r.ok, r.message || r.error);
+      if (r.ok) { scr.file = ""; scr.matches = []; scr.notOn = 0; await paintRaffle(); }
+      else $("scrWin").disabled = false;
+    } catch (e) { msg(false, "Could not guarantee: " + e.message); $("scrWin").disabled = false; }
+  };
+  if ($("scrRest")) $("scrRest").onclick = async () => {
+    const ids = scr.notOnIds || [];
+    if (!ids.length || !confirm(`Screen out the ${ids.length} entries that are not on ${scr.file}?\n\n` +
+        `They get the ordinary "not selected" email after the draw. You can put them back until then.`)) return;
+    $("scrRest").disabled = true;
+    try {
+      const r = await rpc("raffle_exclude_entries", { p_release_id: id, p_ids: ids, p_reason: "Not on " + scr.file });
+      msg(r.ok, r.message || r.error);
+      if (r.ok) { scr.notOn = 0; scr.notOnIds = []; await paintRaffle(); }
+      else $("scrRest").disabled = false;
+    } catch (e) { msg(false, "Could not screen out: " + e.message); $("scrRest").disabled = false; }
+  };
   if ($("scrGo")) $("scrGo").onclick = async () => {
     const ids = scr.matches.filter(x => x.pick).map(x => x.e.id);
     if (!ids.length) return;
@@ -1283,12 +1318,12 @@ $("rafCsv").onclick = async () => {
       return `"${v.replace(/"/g,'""')}"`;
     };
     const head = ["Entry code","First","Last","Email","Phone","Instagram","Instagram link",
-                  "Size","Status","Screened out","Store","Entered at"];
+                  "Size","Status","Guaranteed","Screened out","Store","Entered at"];
     const csv = [head.join(",")].concat(rows.map(r => [
       r.code, r.first_name, r.last_name, r.email, r.phone,
       r.instagram || "",
       r.instagram ? "https://instagram.com/" + r.instagram : "",
-      r.size, r.status, r.excluded_at ? (r.excluded_reason || "yes") : "", locName(r.location_id),
+      r.size, r.status, r.guaranteed_at ? "yes" : "", r.excluded_at ? (r.excluded_reason || "yes") : "", locName(r.location_id),
       new Date(r.created_at).toLocaleString()
     ].map(q).join(","))).join("\n");
     const a = document.createElement("a");
