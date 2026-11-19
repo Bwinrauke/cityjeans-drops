@@ -1,5 +1,5 @@
 -- UGG Sunburst Dusted Cocoa raffle: pickup extended from Fri Nov 20 8 PM to
--- Sat Nov 21 8 PM ET, and every winner is emailed Fri Nov 20 at 10 AM ET.
+-- Sat Nov 21 8 PM ET, and every winner is emailed Fri Nov 20 at 6 PM ET (moved from 10 AM at Ben's request).
 -- Adds the 'raffle_pickup_extended' template to render_notification (the
 -- 'code' and 'name' keys are untouched). The nightly no-show sweep was paused
 -- for all drops on 2026-11-19 (cron.alter_job active=false) at Ben's choice.
@@ -45,7 +45,7 @@ update public.releases
 insert into public.notifications (reservation_id, channel, template, to_address, payload, send_after)
 select x.id, 'email', 'raffle_pickup_extended', x.email,
        jsonb_build_object('code', x.code, 'release', rel.name),
-       timestamptz '2026-11-20 10:00:00 America/New_York'
+       timestamptz '2026-11-20 18:00:00 America/New_York'
   from public.raffle_entries e
   join public.reservations x on x.id = e.reservation_id
   join public.releases rel on rel.id = e.release_id
