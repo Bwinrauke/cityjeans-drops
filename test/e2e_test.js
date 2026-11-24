@@ -1179,10 +1179,10 @@ const { chromium, devices } = require('playwright');
       return r;
     }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a',
         TEST.slug, SUSP_PHONE]);
-    if (out.ok || out.error !== 'suspended')
-      throw new Error('a suspended person was allowed through: ' + JSON.stringify(out).slice(0, 160));
-    if (!/paused/i.test(out.message || '') || !out.eligible_again)
-      throw new Error('the refusal does not say when it ends: ' + out.message);
+    if (out.ok) { ours.add(out.code); throw new Error('a suspended person was allowed through: ' + JSON.stringify(out).slice(0, 160)); }
+    // suspensions are staff-only: the refusal must look like an ordinary sell-out
+    if (out.error !== 'sold_out' || /paus|suspen|90 days/i.test(JSON.stringify(out)))
+      throw new Error('the refusal gives the suspension away: ' + JSON.stringify(out).slice(0, 160));
   });
 
   if (SWEEP_OK) await step('the suspended tab lists them with the time left', async () => {
@@ -1214,7 +1214,7 @@ const { chromium, devices } = require('playwright');
     }, ['http://localhost:8900', 'sb_publishable_Tk7DTTfSz7hEeib_7dHbyw_ncWSJG9a',
         TEST.slug, SUSP_PHONE]);
     if (out.ok) ours.add(out.code);
-    if (out.error === 'suspended') throw new Error('still blocked after the lift');
+    if (!out.ok) throw new Error('still blocked after the lift: ' + JSON.stringify(out).slice(0, 160));
   });
 
   if (SWEEP_OK) await step('the same two misses cannot suspend them a second time', async () => {

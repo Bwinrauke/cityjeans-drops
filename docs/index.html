@@ -802,15 +802,12 @@
     $("fine").innerHTML = isRaffle()
       // the rules above already cover one-entry-per-person and messaging, so this
       // only adds what they don't say
-      ? `Two won or reserved pairs in a row that nobody collects pauses the account
-         for 90 days.<br><br>Message and data rates may apply. Reply STOP to any text
-         to opt out.`
+      ? `Message and data rates may apply. Reply STOP to any text to opt out.`
       : `<b>One reservation per person per release.</b> Bring your confirmation code to
          the store during the pickup window — unclaimed pairs are released back to the
          floor.<br><br>
-         Miss two pickups in a row and the account is paused for 90 days. If you can't
-         make it, reply to your confirmation email and we'll cancel it, no
-         penalty.<br><br>${consent}`;
+         If you can't make it, reply to your confirmation email and we'll cancel
+         it.<br><br>${consent}`;
   }
 
   // Directions link from the store locator on cityjeans.com, falling back to the
@@ -965,12 +962,6 @@
           if (r.duplicate) { t.duplicate = true; t.duplicate_message = r.duplicate_message; }
           paintTicket(t);
           btn.disabled = false; return show("s-done", 3);
-        }
-        else if (r.error === "suspended") {
-          // worth more than one red line: they need to know when it ends and
-          // that a manager can look at it
-          e.innerHTML = `<b>This account is paused.</b><br>${esc(r.message)}`;
-          e.classList.add("show");
         }
         else if (r.error === "duplicate" && (r.reservation || r.entry)) {
           e.innerHTML = esc(r.message) + " Code <b>" +
